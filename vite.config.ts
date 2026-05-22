@@ -1,14 +1,19 @@
-import { defineConfig } from 'vite'
 import { tanstackStart } from '@tanstack/react-start/plugin/vite'
-import viteTsConfigPaths from 'vite-tsconfig-paths'
+import { defineConfig } from 'vite'
+import viteReact from '@vitejs/plugin-react'
+import { nitro } from 'nitro/vite'
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
+  resolve: {
+    tsconfigPaths: true,
+  },
   plugins: [
-    viteTsConfigPaths(),
     tailwindcss(),
     tanstackStart({
       srcDirectory: 'app',
     }),
+    nitro(),
+    viteReact(),
   ],
 })
