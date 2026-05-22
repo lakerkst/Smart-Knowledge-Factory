@@ -62,7 +62,7 @@ function LandingPage() {
               <span className="text-xs font-medium text-primary">Платформа корпоративного обучения</span>
             </div>
 
-            <h1 className="text-5xl font-extrabold leading-tight tracking-tight text-text md:text-6xl lg:text-7xl animate-fade-in" style={{ animationDelay: '0.1s', animationFillMode: 'both' }}>
+            <h1 className="text-3xl font-extrabold leading-tight tracking-tight text-text sm:text-5xl md:text-6xl lg:text-7xl animate-fade-in" style={{ animationDelay: '0.1s', animationFillMode: 'both' }}>
               Обучение, которое{' '}
               <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
                 работает
@@ -74,15 +74,15 @@ function LandingPage() {
               Сотрудники не смогут пропустить материал — система гарантирует усвоение знаний.
             </p>
 
-            <div className="mt-8 flex items-center justify-center gap-4 animate-fade-in" style={{ animationDelay: '0.3s', animationFillMode: 'both' }}>
-              <Link to="/login">
-                <Button size="lg" className="text-base">
+            <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row sm:gap-4 animate-fade-in" style={{ animationDelay: '0.3s', animationFillMode: 'both' }}>
+              <Link to="/login" className="w-full sm:w-auto">
+                <Button size="lg" className="w-full text-base sm:w-auto">
                   Начать бесплатно
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               </Link>
-              <Link to="/learn/token-ivan-abc123">
-                <Button variant="secondary" size="lg" className="text-base">
+              <Link to="/learn/token-ivan-abc123" className="w-full sm:w-auto">
+                <Button variant="secondary" size="lg" className="w-full text-base sm:w-auto">
                   <Play className="h-4 w-4" />
                   Демо для сотрудника
                 </Button>
@@ -194,7 +194,7 @@ function LandingPage() {
 
       <section id="stats" className="py-20 bg-surface-dim">
         <div className="mx-auto max-w-7xl px-6">
-          <div className="grid gap-8 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-6 md:grid-cols-4">
             {[
               { value: '95%', label: 'Завершают курс', icon: CheckCircle2 },
               { value: '3x', label: 'Выше усвоение', icon: BookOpen },
@@ -238,7 +238,7 @@ function LandingPage() {
       </section>
 
       <footer className="border-t border-border-light bg-surface-raised py-8">
-        <div className="mx-auto max-w-7xl px-6 flex items-center justify-between">
+        <div className="mx-auto max-w-7xl px-6 flex flex-col items-center justify-between gap-3 sm:flex-row">
           <div className="flex items-center gap-2">
             <GraduationCap className="h-5 w-5 text-primary" />
             <span className="text-sm font-semibold text-text">Smart Knowledge Factory</span>
