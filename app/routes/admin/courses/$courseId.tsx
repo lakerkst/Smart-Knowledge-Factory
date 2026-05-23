@@ -4,7 +4,6 @@ import {
   ArrowLeft,
   Plus,
   GripVertical,
-  Video,
   HelpCircle,
   Clock,
   Trash2,
@@ -18,19 +17,20 @@ import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Badge } from '~/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '~/components/ui/card'
-import { mockCourses, mockLessons, mockQuestions } from '~/lib/mock-data'
+import { getCourseFn } from '~/lib/server-fns/courses'
 import { formatDuration, cn } from '~/lib/utils'
 
 export const Route = createFileRoute('/admin/courses/$courseId')({
+  loader: async ({ params }) => {
+    const result = await getCourseFn({ data: { courseId: params.courseId } })
+    return { course: result.course }
+  },
   component: CourseEditorPage,
 })
 
 function CourseEditorPage() {
-  const { courseId } = Route.useParams()
-  const course = mockCourses.find((c) => c.id === courseId)
-  const lessons = mockLessons
-    .filter((l) => l.courseId === courseId)
-    .sort((a, b) => a.orderIndex - b.orderIndex)
+  const { course } = Route.useLoaderData()
+  const lessons = course?.lessons || []
 
   const [expandedLesson, setExpandedLesson] = useState<string | null>(
     lessons[0]?.id || null
@@ -43,6 +43,9 @@ function CourseEditorPage() {
       </div>
     )
   }
+
+  const totalQuestions = lessons.reduce((acc, l) => acc + l.questions.length, 0)
+  const totalDuration = lessons.reduce((acc, l) => acc + l.duration, 0)
 
   return (
     <div>
@@ -79,9 +82,7 @@ function CourseEditorPage() {
             </div>
 
             {lessons.map((lesson, index) => {
-              const questions = mockQuestions
-                .filter((q) => q.lessonId === lesson.id)
-                .sort((a, b) => a.orderIndex - b.orderIndex)
+              const questions = lesson.questions
               const isExpanded = expandedLesson === lesson.id
 
               return (
@@ -152,8 +153,8 @@ function CourseEditorPage() {
 
                             {questions.length > 0 ? (
                               <div className="space-y-2">
-                                {questions.map((q, qi) => {
-                                  const opts = JSON.parse(q.options) as string[]
+                                {questions.map((q) => {
+                                  const opts = q.options
                                   return (
                                     <div key={q.id} className="rounded-xl border border-border-light p-3">
                                       <div className="flex items-start justify-between">
@@ -240,14 +241,12 @@ function CourseEditorPage() {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-text-muted">Вопросов</span>
-                    <span className="font-medium text-text">
-                      {mockQuestions.filter((q) => lessons.some((l) => l.id === q.lessonId)).length}
-                    </span>
+                    <span className="font-medium text-text">{totalQuestions}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-text-muted">Длительность</span>
                     <span className="font-medium text-text">
-                      {formatDuration(lessons.reduce((acc, l) => acc + l.duration, 0))}
+                      {formatDuration(totalDuration)}
                     </span>
                   </div>
                 </div>

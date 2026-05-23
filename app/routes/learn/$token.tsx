@@ -15,17 +15,39 @@ import { QuizBlock } from '~/components/quiz-block'
 import { Badge } from '~/components/ui/badge'
 import { Progress } from '~/components/ui/progress'
 import { formatDuration, cn } from '~/lib/utils'
-import { mockUsers, mockCourseAssignments, mockCourses, mockLessons, mockQuestions, mockLessonProgress } from '~/lib/mock-data'
+import { getEmployeeByTokenFn } from '~/lib/server-fns/auth'
+import { getEmployeeCoursesFn, getEmployeeCourseFn } from '~/lib/server-fns/courses'
+import { completeLessonFn } from '~/lib/server-fns/progress'
 
 export const Route = createFileRoute('/learn/$token')({
+  loader: async ({ params }) => {
+    const { employee } = await getEmployeeByTokenFn({ data: { token: params.token } })
+    if (!employee) return { employee: null, courses: [], courseDetails: {} }
+
+    const courses = await getEmployeeCoursesFn({ data: { userId: employee.id } })
+
+    // Load full details for each course (lessons, questions, progress)
+    const courseDetails: Record<string, Awaited<ReturnType<typeof getEmployeeCourseFn>>['course']> = {}
+    await Promise.all(
+      (courses || []).map(async (c) => {
+        if (c) {
+          const { course } = await getEmployeeCourseFn({
+            data: { userId: employee.id, courseId: c.id },
+          })
+          if (course) courseDetails[c.id] = course
+        }
+      })
+    )
+
+    return { employee, courses: courses || [], courseDetails }
+  },
   component: LearnPage,
 })
 
 type ViewState = 'welcome' | 'courses' | 'player'
 
 function LearnPage() {
-  const { token } = Route.useParams()
-  const employee = mockUsers.find((u) => u.personalToken === token && u.role === 'employee')
+  const { employee, courses, courseDetails } = Route.useLoaderData()
 
   const [view, setView] = useState<ViewState>('welcome')
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null)
@@ -35,42 +57,31 @@ function LearnPage() {
   const [attemptNumber, setAttemptNumber] = useState(1)
   const [seekTo, setSeekTo] = useState<number | null>(null)
   const [isMinimized, setIsMinimized] = useState(false)
-  const [completedLessons, setCompletedLessons] = useState<Set<string>>(
-    new Set(
-      mockLessonProgress
-        .filter((lp) => lp.userId === employee?.id && lp.status === 'passed')
-        .map((lp) => lp.lessonId)
-    )
-  )
 
-  const assignments = useMemo(
-    () => (employee ? mockCourseAssignments.filter((a) => a.userId === employee.id) : []),
-    [employee]
-  )
+  // Initialize completed lessons from loaded progress data
+  const [completedLessons, setCompletedLessons] = useState<Set<string>>(() => {
+    const set = new Set<string>()
+    Object.values(courseDetails).forEach((course) => {
+      if (course) {
+        course.lessons.forEach((l) => {
+          if (l.status === 'passed') set.add(l.id)
+        })
+      }
+    })
+    return set
+  })
 
-  const courses = useMemo(
-    () =>
-      assignments.map((a) => {
-        const course = mockCourses.find((c) => c.id === a.courseId)!
-        const lessons = mockLessons.filter((l) => l.courseId === course.id).sort((a, b) => a.orderIndex - b.orderIndex)
-        return { ...course, lessons }
-      }),
-    [assignments]
-  )
+  const selectedCourse = selectedCourseId ? courseDetails[selectedCourseId] : null
+  const selectedCourseLessons = selectedCourse?.lessons || []
+  const currentLesson = selectedCourseLessons[currentLessonIndex]
 
-  const selectedCourse = useMemo(
-    () => courses.find((c) => c.id === selectedCourseId),
-    [courses, selectedCourseId]
-  )
-
-  const currentLesson = selectedCourse?.lessons[currentLessonIndex]
   const questions = useMemo(
     () =>
       currentLesson
-        ? mockQuestions
-            .filter((q) => q.lessonId === currentLesson.id)
-            .sort((a, b) => a.orderIndex - b.orderIndex)
-            .map((q) => ({ ...q, options: JSON.parse(q.options) as string[] }))
+        ? currentLesson.questions.map((q) => ({
+            ...q,
+            options: typeof q.options === 'string' ? JSON.parse(q.options) as string[] : q.options as string[],
+          }))
         : [],
     [currentLesson]
   )
@@ -105,11 +116,12 @@ function LearnPage() {
       setIsMinimized(true)
       setAttemptNumber(1)
     } else if (questions.length === 0) {
-      if (currentLesson) {
+      if (currentLesson && employee) {
         setCompletedLessons((prev) => new Set(prev).add(currentLesson.id))
+        completeLessonFn({ data: { userId: employee.id, lessonId: currentLesson.id } })
       }
     }
-  }, [questions, triggeredQuestions, currentLesson])
+  }, [questions, triggeredQuestions, currentLesson, employee])
 
   const handleCorrectAnswer = useCallback(() => {
     setShowQuiz(false)
@@ -120,11 +132,12 @@ function LearnPage() {
     )
 
     if (!nextUnTriggered && currentQuestionIndex >= questions.length - 1) {
-      if (currentLesson) {
+      if (currentLesson && employee) {
         setCompletedLessons((prev) => new Set(prev).add(currentLesson.id))
+        completeLessonFn({ data: { userId: employee.id, lessonId: currentLesson.id } })
       }
     }
-  }, [currentQuestionIndex, questions, triggeredQuestions, currentLesson])
+  }, [currentQuestionIndex, questions, triggeredQuestions, currentLesson, employee])
 
   const handleFirstWrong = useCallback(() => {
     setAttemptNumber(2)
@@ -150,9 +163,8 @@ function LearnPage() {
   }
 
   const goToLesson = (index: number) => {
-    if (!selectedCourse) return
-    const lesson = selectedCourse.lessons[index]
-    const prevLesson = index > 0 ? selectedCourse.lessons[index - 1] : null
+    if (!selectedCourseLessons.length) return
+    const prevLesson = index > 0 ? selectedCourseLessons[index - 1] : null
     if (index > 0 && prevLesson && !completedLessons.has(prevLesson.id)) return
 
     setCurrentLessonIndex(index)
@@ -186,8 +198,8 @@ function LearnPage() {
             Добро пожаловать, {employee.name.split(' ')[0]}!
           </h1>
           <p className="mt-3 text-text-secondary">
-            Вас ожидает корпоративное обучение. Вам назначено {assignments.length}{' '}
-            {assignments.length === 1 ? 'курс' : 'курса'}.
+            Вас ожидает корпоративное обучение. Вам назначено {courses.length}{' '}
+            {courses.length === 1 ? 'курс' : 'курса'}.
           </p>
 
           <div className="mt-6 rounded-2xl border border-border-light bg-surface-raised p-5 text-left shadow-card">
@@ -238,8 +250,10 @@ function LearnPage() {
 
           <div className="space-y-4">
             {courses.map((course, i) => {
-              const completed = course.lessons.filter((l) => completedLessons.has(l.id)).length
-              const progress = course.lessons.length > 0 ? Math.round((completed / course.lessons.length) * 100) : 0
+              const detail = courseDetails[course.id]
+              const lessonsArr = detail?.lessons || []
+              const completed = lessonsArr.filter((l) => completedLessons.has(l.id)).length
+              const progress = lessonsArr.length > 0 ? Math.round((completed / lessonsArr.length) * 100) : 0
 
               return (
                 <div
@@ -255,11 +269,11 @@ function LearnPage() {
                       <div className="mt-3 flex items-center gap-4 text-xs text-text-muted">
                         <span className="flex items-center gap-1">
                           <BookOpen className="h-3.5 w-3.5" />
-                          {course.lessons.length} уроков
+                          {course.lessonsCount} уроков
                         </span>
                         <span className="flex items-center gap-1">
                           <Clock className="h-3.5 w-3.5" />
-                          {formatDuration(course.lessons.reduce((a, l) => a + l.duration, 0))}
+                          {formatDuration(lessonsArr.reduce((a, l) => a + l.duration, 0))}
                         </span>
                       </div>
                     </div>
@@ -295,7 +309,7 @@ function LearnPage() {
             <div>
               <p className="text-sm font-semibold text-text">{selectedCourse?.title}</p>
               <p className="text-xs text-text-muted">
-                Урок {currentLessonIndex + 1} из {selectedCourse?.lessons.length}
+                Урок {currentLessonIndex + 1} из {selectedCourseLessons.length}
               </p>
             </div>
           </div>
@@ -310,10 +324,10 @@ function LearnPage() {
           <div className="hidden w-56 shrink-0 md:block">
             <p className="mb-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Уроки</p>
             <div className="space-y-1.5">
-              {selectedCourse?.lessons.map((lesson, index) => {
+              {selectedCourseLessons.map((lesson, index) => {
                 const isCompleted = completedLessons.has(lesson.id)
                 const isCurrent = index === currentLessonIndex
-                const prevCompleted = index === 0 || completedLessons.has(selectedCourse.lessons[index - 1].id)
+                const prevCompleted = index === 0 || completedLessons.has(selectedCourseLessons[index - 1].id)
                 const isLocked = index > 0 && !prevCompleted
 
                 return (
@@ -391,7 +405,7 @@ function LearnPage() {
                         <p className="text-sm text-success/70">Переходите к следующему уроку</p>
                       </div>
                     </div>
-                    {selectedCourse && currentLessonIndex < selectedCourse.lessons.length - 1 && (
+                    {selectedCourseLessons.length > 0 && currentLessonIndex < selectedCourseLessons.length - 1 && (
                       <Button
                         onClick={() => goToLesson(currentLessonIndex + 1)}
                         variant="success"

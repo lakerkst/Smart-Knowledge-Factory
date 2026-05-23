@@ -10,28 +10,20 @@ import {
 import { Topbar } from '~/components/layout/topbar'
 import { Button } from '~/components/ui/button'
 import { Badge } from '~/components/ui/badge'
-import { mockCourses, mockLessons, mockCourseAssignments } from '~/lib/mock-data'
+import { getCoursesFn } from '~/lib/server-fns/courses'
 import { formatDuration } from '~/lib/utils'
 
 export const Route = createFileRoute('/admin/courses/')({
+  loader: async ({ context }) => {
+    const companyId = context.user.companyId!
+    const courses = await getCoursesFn({ data: { companyId } })
+    return { courses }
+  },
   component: CoursesPage,
 })
 
 function CoursesPage() {
-  const { user } = Route.useRouteContext()
-
-  const courses = mockCourses
-    .filter((c) => c.companyId === user.companyId)
-    .map((course) => {
-      const lessons = mockLessons.filter((l) => l.courseId === course.id)
-      const assigned = mockCourseAssignments.filter((a) => a.courseId === course.id)
-      return {
-        ...course,
-        lessonsCount: lessons.length,
-        assignedCount: assigned.length,
-        totalDuration: lessons.reduce((acc, l) => acc + l.duration, 0),
-      }
-    })
+  const { courses } = Route.useLoaderData()
 
   return (
     <div>

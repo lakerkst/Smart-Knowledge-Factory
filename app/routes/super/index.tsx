@@ -1,15 +1,11 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useState } from 'react'
 import {
   Building2,
   Users,
   BookOpen,
   Shield,
-  CheckCircle2,
-  XCircle,
   Plus,
   TrendingUp,
-  BarChart3,
 } from 'lucide-react'
 import { Topbar } from '~/components/layout/topbar'
 import { MetricCard } from '~/components/ui/metric-card'
@@ -17,11 +13,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '~/components/ui/card'
 import { Badge } from '~/components/ui/badge'
 import { Button } from '~/components/ui/button'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '~/components/ui/tabs'
-import {
-  mockCompanies,
-  mockUsers,
-  mockCourses,
-} from '~/lib/mock-data'
+import { getSuperStatsFn } from '~/lib/server-fns/statistics'
 import {
   BarChart,
   Bar,
@@ -38,43 +30,19 @@ import {
 import { formatDate } from '~/lib/utils'
 
 export const Route = createFileRoute('/super/')({
+  loader: async () => {
+    const stats = await getSuperStatsFn()
+    return { stats }
+  },
   component: SuperDashboard,
 })
 
 function SuperDashboard() {
-  const companies = mockCompanies
-  const allEmployees = mockUsers.filter((u) => u.role === 'employee')
-  const allAdmins = mockUsers.filter((u) => u.role === 'company_admin')
-  const allCourses = mockCourses
-
-  const companyStats = companies.map((company) => {
-    const employees = allEmployees.filter((u) => u.companyId === company.id)
-    const courses = allCourses.filter((c) => c.companyId === company.id)
-    const admin = allAdmins.find((u) => u.companyId === company.id)
-
-    return {
-      ...company,
-      employeeCount: employees.length,
-      courseCount: courses.length,
-      adminName: admin?.name || 'Не назначен',
-      adminEmail: admin?.email || '-',
-    }
-  })
+  const { stats } = Route.useLoaderData()
 
   const statusDistribution = [
-    { name: 'Активные', value: companies.filter((c) => c.isActive).length, fill: 'oklch(0.65 0.17 145)' },
-    { name: 'Неактивные', value: companies.filter((c) => !c.isActive).length, fill: 'oklch(0.90 0.01 250)' },
-  ]
-
-  const topByEmployees = [...companyStats].sort((a, b) => b.employeeCount - a.employeeCount)
-  const topByCourses = [...companyStats].sort((a, b) => b.courseCount - a.courseCount)
-
-  const newCompaniesData = [
-    { month: 'Янв', count: 1 },
-    { month: 'Фев', count: 1 },
-    { month: 'Мар', count: 1 },
-    { month: 'Апр', count: 0 },
-    { month: 'Май', count: 0 },
+    { name: 'Активные', value: stats.totals.activeCompanies, fill: 'oklch(0.65 0.17 145)' },
+    { name: 'Неактивные', value: stats.totals.companies - stats.totals.activeCompanies, fill: 'oklch(0.90 0.01 250)' },
   ]
 
   return (
@@ -84,10 +52,10 @@ function SuperDashboard() {
       <div className="p-6">
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {[
-            { title: 'Компании', value: companies.length, icon: Building2, subtitle: `${companies.filter((c) => c.isActive).length} активных` },
-            { title: 'Сотрудники', value: allEmployees.length, icon: Users, subtitle: 'На платформе' },
-            { title: 'Курсы', value: allCourses.length, icon: BookOpen, subtitle: 'Всего создано' },
-            { title: 'Админы', value: allAdmins.length, icon: Shield, subtitle: 'Компаний' },
+            { title: 'Компании', value: stats.totals.companies, icon: Building2, subtitle: `${stats.totals.activeCompanies} активных` },
+            { title: 'Сотрудники', value: stats.totals.employees, icon: Users, subtitle: 'На платформе' },
+            { title: 'Курсы', value: stats.totals.courses, icon: BookOpen, subtitle: 'Всего создано' },
+            { title: 'Админы', value: stats.totals.admins, icon: Shield, subtitle: 'Компаний' },
           ].map((metric, i) => (
             <div
               key={metric.title}
@@ -103,13 +71,12 @@ function SuperDashboard() {
           <Tabs defaultValue="companies">
             <TabsList>
               <TabsTrigger value="companies">Компании</TabsTrigger>
-              <TabsTrigger value="admins">Админы</TabsTrigger>
               <TabsTrigger value="stats">Статистика</TabsTrigger>
             </TabsList>
 
             <TabsContent value="companies">
               <div className="flex items-center justify-between mb-4">
-                <p className="text-sm text-text-muted">{companies.length} компаний</p>
+                <p className="text-sm text-text-muted">{stats.totals.companies} компаний</p>
                 <Button size="sm">
                   <Plus className="h-3.5 w-3.5" />
                   Добавить компанию
@@ -131,7 +98,7 @@ function SuperDashboard() {
                         </tr>
                       </thead>
                       <tbody>
-                        {companyStats.map((company) => (
+                        {stats.companyStats.map((company) => (
                           <tr
                             key={company.id}
                             className="border-b border-border-light last:border-0 hover:bg-surface-dim/50 transition-colors"
@@ -150,10 +117,7 @@ function SuperDashboard() {
                               </Badge>
                             </td>
                             <td className="px-5 py-3.5">
-                              <div>
-                                <p className="text-sm text-text">{company.adminName}</p>
-                                <p className="text-xs text-text-muted">{company.adminEmail}</p>
-                              </div>
+                              <p className="text-sm text-text">{company.adminName}</p>
                             </td>
                             <td className="px-5 py-3.5 text-sm text-text">{company.employeeCount}</td>
                             <td className="px-5 py-3.5 text-sm text-text">{company.courseCount}</td>
@@ -162,52 +126,6 @@ function SuperDashboard() {
                             </td>
                           </tr>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            <TabsContent value="admins">
-              <Card>
-                <CardContent className="p-0">
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr className="border-b border-border-light">
-                          <th className="px-5 py-3.5 text-left text-xs font-semibold text-text-muted uppercase tracking-wider">Имя</th>
-                          <th className="px-5 py-3.5 text-left text-xs font-semibold text-text-muted uppercase tracking-wider">Email</th>
-                          <th className="px-5 py-3.5 text-left text-xs font-semibold text-text-muted uppercase tracking-wider">Компания</th>
-                          <th className="px-5 py-3.5 text-left text-xs font-semibold text-text-muted uppercase tracking-wider">Статус</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {allAdmins.map((admin) => {
-                          const company = companies.find((c) => c.id === admin.companyId)
-                          return (
-                            <tr
-                              key={admin.id}
-                              className="border-b border-border-light last:border-0 hover:bg-surface-dim/50 transition-colors"
-                            >
-                              <td className="px-5 py-3.5">
-                                <div className="flex items-center gap-3">
-                                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-100 text-xs font-semibold text-primary">
-                                    {admin.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
-                                  </div>
-                                  <span className="text-sm font-medium text-text">{admin.name}</span>
-                                </div>
-                              </td>
-                              <td className="px-5 py-3.5 text-sm text-text-muted">{admin.email}</td>
-                              <td className="px-5 py-3.5 text-sm text-text">{company?.name || '-'}</td>
-                              <td className="px-5 py-3.5">
-                                <Badge variant={admin.isActive ? 'success' : 'secondary'}>
-                                  {admin.isActive ? 'Активен' : 'Неактивен'}
-                                </Badge>
-                              </td>
-                            </tr>
-                          )
-                        })}
                       </tbody>
                     </table>
                   </div>
@@ -226,7 +144,7 @@ function SuperDashboard() {
                   </CardHeader>
                   <CardContent>
                     <ResponsiveContainer width="100%" height={250}>
-                      <BarChart data={newCompaniesData}>
+                      <BarChart data={stats.newCompaniesPerMonth}>
                         <CartesianGrid strokeDasharray="3 3" stroke="oklch(0.90 0.01 250)" />
                         <XAxis dataKey="month" tick={{ fontSize: 11, fill: 'oklch(0.60 0.015 250)' }} />
                         <YAxis tick={{ fontSize: 11, fill: 'oklch(0.60 0.015 250)' }} />
@@ -276,7 +194,7 @@ function SuperDashboard() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-3">
-                      {topByEmployees.map((c, i) => (
+                      {stats.topByEmployees.map((c, i) => (
                         <div key={c.id} className="flex items-center gap-3">
                           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary-50 text-xs font-bold text-primary">
                             {i + 1}
@@ -298,7 +216,7 @@ function SuperDashboard() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-3">
-                      {topByCourses.map((c, i) => (
+                      {stats.topByCourses.map((c, i) => (
                         <div key={c.id} className="flex items-center gap-3">
                           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary-50 text-xs font-bold text-primary">
                             {i + 1}

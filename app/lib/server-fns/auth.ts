@@ -1,22 +1,38 @@
 import { createServerFn } from '@tanstack/react-start'
 import { getCookie, setCookie, deleteCookie } from '@tanstack/react-start/server'
+import { eq, and } from 'drizzle-orm'
+import { compare } from 'bcryptjs'
 import { createToken, verifyToken } from '../auth'
-import { mockUsers } from '../mock-data'
+import { db } from '~/../db'
+import { users } from '~/../db/schema'
 
 export const loginFn = createServerFn({ method: 'POST' })
   .inputValidator((data: { email: string; password: string }) => data)
   .handler(async ({ data }) => {
-    const user = mockUsers.find(
-      (u) => u.email === data.email && (u.role === 'company_admin' || u.role === 'super_admin')
-    )
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, data.email))
+      .limit(1)
 
-    if (!user) {
+    if (!user || !user.passwordHash) {
       return { error: 'Неверный email или пароль' }
     }
 
-    if (data.password !== 'demo123') {
+    if (user.role === 'employee') {
+      return { error: 'Сотрудники входят по персональной ссылке' }
+    }
+
+    const validPassword = await compare(data.password, user.passwordHash)
+    if (!validPassword) {
       return { error: 'Неверный email или пароль' }
     }
+
+    // Update last login
+    await db
+      .update(users)
+      .set({ lastLoginAt: new Date() })
+      .where(eq(users.id, user.id))
 
     const token = await createToken({
       userId: user.id,
@@ -63,8 +79,25 @@ export const logoutFn = createServerFn({ method: 'POST' }).handler(async () => {
 export const getEmployeeByTokenFn = createServerFn({ method: 'GET' })
   .inputValidator((data: { token: string }) => data)
   .handler(async ({ data }) => {
-    const user = mockUsers.find((u) => u.personalToken === data.token && u.role === 'employee')
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(
+        and(
+          eq(users.personalToken, data.token),
+          eq(users.role, 'employee'),
+          eq(users.isActive, true)
+        )
+      )
+      .limit(1)
+
     if (!user) return { employee: null }
+
+    // Update last login
+    await db
+      .update(users)
+      .set({ lastLoginAt: new Date() })
+      .where(eq(users.id, user.id))
 
     return {
       employee: {

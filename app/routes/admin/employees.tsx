@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
 import {
   UserPlus,
@@ -21,57 +21,54 @@ import {
   DialogTitle,
   DialogDescription,
 } from '~/components/ui/dialog'
-import {
-  mockUsers,
-  mockCourseAssignments,
-  mockLessons,
-  mockLessonProgress,
-} from '~/lib/mock-data'
-import { generateToken, cn } from '~/lib/utils'
+import { getEmployeesFn, createEmployeeFn, generateLinkFn } from '~/lib/server-fns/employees'
+import { cn } from '~/lib/utils'
 
 export const Route = createFileRoute('/admin/employees')({
+  loader: async ({ context }) => {
+    const companyId = context.user.companyId!
+    const employees = await getEmployeesFn({ data: { companyId } })
+    return { employees }
+  },
   component: EmployeesPage,
 })
 
 function EmployeesPage() {
   const { user } = Route.useRouteContext()
+  const { employees } = Route.useLoaderData()
+  const router = useRouter()
   const [search, setSearch] = useState('')
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [showLinkDialog, setShowLinkDialog] = useState(false)
   const [newName, setNewName] = useState('')
   const [generatedLink, setGeneratedLink] = useState('')
   const [copied, setCopied] = useState(false)
-  const [selectedEmployee, setSelectedEmployee] = useState<string | null>(null)
+  const [isCreating, setIsCreating] = useState(false)
 
-  const employees = mockUsers
-    .filter((u) => u.companyId === user.companyId && u.role === 'employee')
-    .map((emp) => {
-      const assignments = mockCourseAssignments.filter((a) => a.userId === emp.id)
-      const totalLessons = assignments.reduce(
-        (acc, a) => acc + mockLessons.filter((l) => l.courseId === a.courseId).length,
-        0
-      )
-      const completed = mockLessonProgress.filter(
-        (lp) => lp.userId === emp.id && lp.status === 'passed'
-      ).length
-      const pct = totalLessons > 0 ? Math.round((completed / totalLessons) * 100) : 0
+  const filtered = employees.filter((emp) =>
+    emp.name.toLowerCase().includes(search.toLowerCase())
+  )
 
-      let status: 'completed' | 'in_progress' | 'not_started' = 'not_started'
-      if (completed > 0 && completed >= totalLessons) status = 'completed'
-      else if (completed > 0 || mockLessonProgress.some((lp) => lp.userId === emp.id))
-        status = 'in_progress'
+  const handleAddEmployee = async () => {
+    if (!newName.trim() || !user.companyId) return
+    setIsCreating(true)
+    try {
+      await createEmployeeFn({ data: { name: newName.trim(), companyId: user.companyId } })
+      setShowAddDialog(false)
+      setNewName('')
+      router.invalidate()
+    } finally {
+      setIsCreating(false)
+    }
+  }
 
-      return { ...emp, totalLessons, completed, progress: pct, status }
-    })
-    .filter((emp) => emp.name.toLowerCase().includes(search.toLowerCase()))
-
-  const handleGenerateLink = (empId: string) => {
-    const emp = mockUsers.find((u) => u.id === empId)
-    if (emp) {
-      setSelectedEmployee(empId)
-      const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/learn/${emp.personalToken || generateToken(24)}`
+  const handleGenerateLink = async (empId: string) => {
+    const result = await generateLinkFn({ data: { employeeId: empId } })
+    if ('token' in result && result.token) {
+      const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/learn/${result.token}`
       setGeneratedLink(link)
       setShowLinkDialog(true)
+      router.invalidate()
     }
   }
 
@@ -122,7 +119,7 @@ function EmployeesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {employees.map((emp) => (
+                  {filtered.map((emp) => (
                     <tr
                       key={emp.id}
                       className="border-b border-border-light last:border-0 hover:bg-surface-dim/50 transition-colors"
@@ -136,7 +133,7 @@ function EmployeesPage() {
                             <p className="text-sm font-medium text-text">{emp.name}</p>
                             <p className="text-xs text-text-muted">
                               {emp.lastLoginAt
-                                ? `Был ${emp.lastLoginAt.toLocaleDateString('ru')}`
+                                ? `Был ${new Date(emp.lastLoginAt).toLocaleDateString('ru')}`
                                 : 'Не входил'}
                             </p>
                           </div>
@@ -154,7 +151,7 @@ function EmployeesPage() {
                         </div>
                       </td>
                       <td className="px-5 py-3.5 text-sm text-text-secondary">
-                        {emp.completed}/{emp.totalLessons}
+                        {emp.lessonsCompleted}/{emp.totalLessons}
                       </td>
                       <td className="px-5 py-3.5 text-right">
                         <div className="flex items-center justify-end gap-1.5">
@@ -177,7 +174,7 @@ function EmployeesPage() {
               </table>
             </div>
 
-            {employees.length === 0 && (
+            {filtered.length === 0 && (
               <div className="py-12 text-center">
                 <p className="text-text-muted">Сотрудники не найдены</p>
               </div>
@@ -203,13 +200,10 @@ function EmployeesPage() {
                 Отмена
               </Button>
               <Button
-                onClick={() => {
-                  setShowAddDialog(false)
-                  setNewName('')
-                }}
-                disabled={!newName.trim()}
+                onClick={handleAddEmployee}
+                disabled={!newName.trim() || isCreating}
               >
-                Добавить
+                {isCreating ? 'Добавление...' : 'Добавить'}
               </Button>
             </div>
           </div>

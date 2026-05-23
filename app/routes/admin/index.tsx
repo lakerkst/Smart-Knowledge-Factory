@@ -3,23 +3,16 @@ import {
   Users,
   BookOpen,
   GraduationCap,
-  CheckCircle2,
-  Clock,
   TrendingUp,
+  Clock,
 } from 'lucide-react'
 import { Topbar } from '~/components/layout/topbar'
 import { MetricCard } from '~/components/ui/metric-card'
 import { Card, CardHeader, CardTitle, CardContent } from '~/components/ui/card'
 import { Progress } from '~/components/ui/progress'
 import { Badge } from '~/components/ui/badge'
-import {
-  mockUsers,
-  mockCourses,
-  mockLessons,
-  mockLessonProgress,
-  mockCourseAssignments,
-  mockActivityLog,
-} from '~/lib/mock-data'
+import { getCompanyStatsFn } from '~/lib/server-fns/statistics'
+import { getEmployeesFn } from '~/lib/server-fns/employees'
 import {
   AreaChart,
   Area,
@@ -31,29 +24,23 @@ import {
 } from 'recharts'
 
 export const Route = createFileRoute('/admin/')({
+  loader: async ({ context }) => {
+    const companyId = context.user.companyId!
+    const [stats, employees] = await Promise.all([
+      getCompanyStatsFn({ data: { companyId } }),
+      getEmployeesFn({ data: { companyId } }),
+    ])
+    return { stats, employees }
+  },
   component: AdminDashboard,
 })
 
 function AdminDashboard() {
-  const { user } = Route.useRouteContext()
-  const companyId = user.companyId
-
-  const employees = mockUsers.filter(
-    (u) => u.companyId === companyId && u.role === 'employee'
-  )
-  const courses = mockCourses.filter((c) => c.companyId === companyId)
-  const lessons = mockLessons.filter((l) =>
-    courses.some((c) => c.id === l.courseId)
-  )
-  const employeeIds = employees.map((e) => e.id)
-  const progress = mockLessonProgress.filter((lp) =>
-    employeeIds.includes(lp.userId)
-  )
-  const completedLessons = progress.filter((lp) => lp.status === 'passed').length
+  const { stats, employees } = Route.useLoaderData()
 
   const recentEmployees = employees
     .filter((e) => e.lastLoginAt)
-    .sort((a, b) => (b.lastLoginAt?.getTime() || 0) - (a.lastLoginAt?.getTime() || 0))
+    .sort((a, b) => new Date(b.lastLoginAt!).getTime() - new Date(a.lastLoginAt!).getTime())
     .slice(0, 5)
 
   return (
@@ -65,7 +52,7 @@ function AdminDashboard() {
           <div className="animate-fade-in" style={{ animationDelay: '0s', animationFillMode: 'both' }}>
             <MetricCard
               title="Сотрудники"
-              value={employees.length}
+              value={stats.totals.employees}
               subtitle="Всего в компании"
               icon={Users}
             />
@@ -73,26 +60,25 @@ function AdminDashboard() {
           <div className="animate-fade-in" style={{ animationDelay: '0.05s', animationFillMode: 'both' }}>
             <MetricCard
               title="Курсы"
-              value={courses.length}
+              value={stats.totals.courses}
               subtitle="Опубликовано"
               icon={BookOpen}
             />
           </div>
           <div className="animate-fade-in" style={{ animationDelay: '0.1s', animationFillMode: 'both' }}>
             <MetricCard
-              title="Уроков пройдено"
-              value={completedLessons}
-              subtitle={`Из ${lessons.length * employees.length} возможных`}
+              title="Завершили обучение"
+              value={stats.totals.completed}
+              subtitle={`Из ${stats.totals.employees} сотрудников`}
               icon={GraduationCap}
             />
           </div>
           <div className="animate-fade-in" style={{ animationDelay: '0.15s', animationFillMode: 'both' }}>
             <MetricCard
-              title="Активность"
-              value={`${Math.round((progress.length / Math.max(1, lessons.length * employees.length)) * 100)}%`}
-              subtitle="Вовлечённость"
+              title="В процессе"
+              value={stats.totals.inProgress}
+              subtitle="Проходят курсы"
               icon={TrendingUp}
-              trend={{ value: 12, label: 'за неделю' }}
             />
           </div>
         </div>
@@ -108,7 +94,7 @@ function AdminDashboard() {
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={240}>
-                  <AreaChart data={mockActivityLog}>
+                  <AreaChart data={stats.activityLog}>
                     <defs>
                       <linearGradient id="colorLogins" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="oklch(0.55 0.18 250)" stopOpacity={0.2} />
@@ -154,34 +140,23 @@ function AdminDashboard() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {recentEmployees.map((emp) => {
-                    const empProgress = progress.filter((lp) => lp.userId === emp.id)
-                    const completed = empProgress.filter((lp) => lp.status === 'passed').length
-                    const assigned = mockCourseAssignments.filter((a) => a.userId === emp.id)
-                    const total = assigned.reduce(
-                      (acc, a) => acc + mockLessons.filter((l) => l.courseId === a.courseId).length,
-                      0
-                    )
-                    const pct = total > 0 ? Math.round((completed / total) * 100) : 0
-
-                    return (
-                      <div key={emp.id} className="flex items-center gap-3 rounded-xl p-3 hover:bg-surface-dim transition-colors">
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-100 text-xs font-semibold text-primary">
-                          {emp.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-text truncate">{emp.name}</p>
-                          <div className="flex items-center gap-2 mt-1">
-                            <Progress value={pct} className="h-1.5 flex-1" />
-                            <span className="text-xs text-text-muted shrink-0">{pct}%</span>
-                          </div>
-                        </div>
-                        <Badge variant={pct === 100 ? 'success' : pct > 0 ? 'warning' : 'secondary'}>
-                          {pct === 100 ? 'Готово' : pct > 0 ? 'Учится' : 'Новый'}
-                        </Badge>
+                  {recentEmployees.map((emp) => (
+                    <div key={emp.id} className="flex items-center gap-3 rounded-xl p-3 hover:bg-surface-dim transition-colors">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-100 text-xs font-semibold text-primary">
+                        {emp.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
                       </div>
-                    )
-                  })}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-text truncate">{emp.name}</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Progress value={emp.progress} className="h-1.5 flex-1" />
+                          <span className="text-xs text-text-muted shrink-0">{emp.progress}%</span>
+                        </div>
+                      </div>
+                      <Badge variant={emp.progress === 100 ? 'success' : emp.progress > 0 ? 'warning' : 'secondary'}>
+                        {emp.progress === 100 ? 'Готово' : emp.progress > 0 ? 'Учится' : 'Новый'}
+                      </Badge>
+                    </div>
+                  ))}
                 </div>
               </CardContent>
             </Card>
@@ -198,30 +173,18 @@ function AdminDashboard() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {courses.map((course) => {
-                  const courseLessons = mockLessons.filter((l) => l.courseId === course.id)
-                  const assigned = mockCourseAssignments.filter((a) => a.courseId === course.id)
-                  const totalPossible = assigned.length * courseLessons.length
-                  const done = assigned.reduce((acc, a) => {
-                    return acc + progress.filter(
-                      (lp) => lp.userId === a.userId && lp.status === 'passed' && courseLessons.some((l) => l.id === lp.lessonId)
-                    ).length
-                  }, 0)
-                  const pct = totalPossible > 0 ? Math.round((done / totalPossible) * 100) : 0
-
-                  return (
-                    <div key={course.id}>
-                      <div className="flex items-center justify-between mb-2">
-                        <div>
-                          <p className="text-sm font-medium text-text">{course.title}</p>
-                          <p className="text-xs text-text-muted">{assigned.length} сотрудников назначено</p>
-                        </div>
-                        <span className="text-sm font-semibold text-text">{pct}%</span>
+                {stats.courseStats.map((course) => (
+                  <div key={course.id}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <p className="text-sm font-medium text-text">{course.title}</p>
+                        <p className="text-xs text-text-muted">{course.assignedCount} сотрудников назначено</p>
                       </div>
-                      <Progress value={pct} className="h-2" />
+                      <span className="text-sm font-semibold text-text">{course.progress}%</span>
                     </div>
-                  )
-                })}
+                    <Progress value={course.progress} className="h-2" />
+                  </div>
+                ))}
               </div>
             </CardContent>
           </Card>
