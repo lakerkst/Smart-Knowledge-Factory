@@ -125,6 +125,10 @@ function LearnPage() {
   const lastSavedPositionRef = useRef(0)
   // Tracks whether the current question's quiz has already been triggered mid-video
   const quizTriggeredRef = useRef(false)
+  // Last time value seen in timeupdate — used to detect seeks vs natural playback
+  const prevTimeRef = useRef(0)
+  // Set when user seeks past a trigger point; cleared when they return before it
+  const quizSkippedBySeekRef = useRef(false)
 
   const [completedLessons, setCompletedLessons] = useState<Set<string>>(() => {
     const set = new Set<string>()
@@ -142,6 +146,8 @@ function LearnPage() {
   useEffect(() => {
     lastSavedPositionRef.current = currentLesson?.maxWatchedPosition || 0
     quizTriggeredRef.current = false
+    quizSkippedBySeekRef.current = false
+    prevTimeRef.current = 0
     setCourseCompleted(false)
   }, [currentLessonIndex, selectedCourseId])
 
@@ -174,14 +180,33 @@ function LearnPage() {
         updateProgressFn({ data: { userId: employee.id, lessonId: currentLesson.id, maxWatchedPosition: time } })
       }
 
-      // Trigger quiz at the question's timecodeTrigger (mid-video).
-      // quizTriggeredRef prevents double-firing on every timeupdate tick.
+      // Distinguish natural playback (~0.25 s steps) from a seek (large jump).
+      // Vimeo fires timeupdate both during playback AND after setCurrentTime calls.
+      const prev = prevTimeRef.current
+      prevTimeRef.current = time
+      const isNaturalStep = time > prev && (time - prev) <= 2
+
+      // Trigger quiz at timecodeTrigger only on natural playback — not when the
+      // user scrubs the progress bar to/past the trigger position.
       if (!quizTriggeredRef.current && questions.length > 0 && currentQuestionIndex < questions.length) {
         const q = questions[currentQuestionIndex]
-        if (q && q.timecodeTrigger > 0 && time >= q.timecodeTrigger) {
-          quizTriggeredRef.current = true
-          setShowQuiz(true)
-          setIsMinimized(true)
+        if (q && q.timecodeTrigger > 0) {
+          if (time < q.timecodeTrigger) {
+            // Playhead is before trigger — clear any seek-skip flag
+            quizSkippedBySeekRef.current = false
+          } else {
+            // Playhead is at or past trigger
+            if (!isNaturalStep) {
+              // Got here via a seek/scrub — suppress trigger until user returns
+              // before the trigger point and lets the video play through naturally
+              quizSkippedBySeekRef.current = true
+            }
+            if (!quizSkippedBySeekRef.current) {
+              quizTriggeredRef.current = true
+              setShowQuiz(true)
+              setIsMinimized(true)
+            }
+          }
         }
       }
     },
@@ -258,26 +283,22 @@ function LearnPage() {
   }, [questions, currentLesson, currentQuestionIndex, markLessonComplete])
 
   const handleCorrectAnswer = useCallback(() => {
-    const nextIndex = currentQuestionIndex + 1
-    if (nextIndex < questions.length) {
-      // More questions remain — advance to next, reset trigger for the new question
-      quizTriggeredRef.current = false
-      setCurrentQuestionIndex(nextIndex)
-      // Keep quiz visible for the next question (don't resume video yet)
-    } else {
-      // All questions answered correctly — lesson complete, resume video
-      quizTriggeredRef.current = false
-      setShowQuiz(false)
-      setIsMinimized(false)
-      if (currentLesson) markLessonComplete(currentLesson.id)
-    }
-  }, [currentQuestionIndex, questions, currentLesson, markLessonComplete])
+    // Advance question index and always resume video.
+    // For timecode-based quizzes: video plays to the next question's trigger.
+    // For post-video fallback: handleVideoComplete will show remaining questions.
+    quizTriggeredRef.current = false
+    quizSkippedBySeekRef.current = false
+    setCurrentQuestionIndex((prev) => prev + 1)
+    setShowQuiz(false)
+    setIsMinimized(false)
+  }, [])
 
   const handleSecondWrong = useCallback(() => {
     const q = questions[currentQuestionIndex]
     if (q) {
-      // Reset trigger so handleTimeUpdate fires quiz again at timecodeTrigger
+      // Reset both flags so the trigger can fire again after replay
       quizTriggeredRef.current = false
+      quizSkippedBySeekRef.current = false
       // Hide quiz, expand video, replay from admin's timecode.
       // currentQuestionIndex stays the same — quiz re-appears at timecodeTrigger.
       setShowQuiz(false)
@@ -809,10 +830,11 @@ function LearnPage() {
                   </div>
                 )}
 
-                {/* Quiz block */}
+                {/* Quiz block — key forces remount on question change so internal state resets */}
                 {showQuiz && questions[currentQuestionIndex] && (
                   <div className="mb-4 animate-slide-up">
                     <QuizBlock
+                      key={currentQuestionIndex}
                       question={questions[currentQuestionIndex].text}
                       options={questions[currentQuestionIndex].options}
                       correctIndex={questions[currentQuestionIndex].correctIndex}
