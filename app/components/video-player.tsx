@@ -31,6 +31,8 @@ export function VideoPlayer({
   const containerRef = useRef<HTMLDivElement>(null)
   const playerRef = useRef<InstanceType<typeof Player> | null>(null)
   const maxWatchedRef = useRef(maxAllowedPosition)
+  // Prevents paused→play effect from firing play() while a seek is in flight
+  const pendingSeekRef = useRef(false)
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(maxAllowedPosition)
   const [maxWatched, setMaxWatched] = useState(maxAllowedPosition)
@@ -146,21 +148,27 @@ export function VideoPlayer({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vimeoId])
 
-  // Pause/resume when quiz overlay is active
+  // Pause/resume when quiz overlay is active.
+  // Skip auto-play when a seek is in flight — seekToTime effect owns play() in that case.
   useEffect(() => {
     if (!playerRef.current) return
     if (paused) {
       playerRef.current.pause()
-    } else {
+    } else if (!pendingSeekRef.current) {
       playerRef.current.play().catch(() => {})
     }
   }, [paused])
 
-  // Seek to specific time (replay on wrong answer)
+  // Seek to specific time (replay on wrong answer).
+  // Sets pendingSeekRef so the paused effect won't race with us.
   useEffect(() => {
     if (seekToTime === null || seekToTime === undefined || !playerRef.current) return
+    pendingSeekRef.current = true
     playerRef.current.setCurrentTime(seekToTime).then(() => {
+      pendingSeekRef.current = false
       playerRef.current?.play().catch(() => {})
+    }).catch(() => {
+      pendingSeekRef.current = false
     })
   }, [seekToTime])
 
