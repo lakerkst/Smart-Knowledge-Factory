@@ -33,6 +33,16 @@ export function VideoPlayer({
   const maxWatchedRef = useRef(maxAllowedPosition)
   // Prevents paused→play effect from firing play() while a seek is in flight
   const pendingSeekRef = useRef(false)
+
+  // Keep callback refs fresh so Vimeo event handlers (set up once in [vimeoId]
+  // effect) always call the latest version — avoids stale-closure bugs.
+  const onTimeUpdateRef = useRef(onTimeUpdate)
+  const onCompleteRef = useRef(onComplete)
+  const onSeekBlockedRef = useRef(onSeekBlocked)
+  useEffect(() => { onTimeUpdateRef.current = onTimeUpdate }, [onTimeUpdate])
+  useEffect(() => { onCompleteRef.current = onComplete }, [onComplete])
+  useEffect(() => { onSeekBlockedRef.current = onSeekBlocked }, [onSeekBlocked])
+
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(maxAllowedPosition)
   const [maxWatched, setMaxWatched] = useState(maxAllowedPosition)
@@ -96,7 +106,7 @@ export function VideoPlayer({
             maxWatchedRef.current = seconds
             setMaxWatched(seconds)
           }
-          onTimeUpdate(seconds)
+          onTimeUpdateRef.current(seconds)
         })
 
         player.on('play', () => setIsPlaying(true))
@@ -104,14 +114,14 @@ export function VideoPlayer({
 
         player.on('ended', () => {
           setIsPlaying(false)
-          onComplete()
+          onCompleteRef.current()
         })
 
         // Block forward seeking beyond maxWatched
         player.on('seeked', ({ seconds }: { seconds: number }) => {
           if (seconds > maxWatchedRef.current + 1) {
             player.setCurrentTime(maxWatchedRef.current)
-            onSeekBlocked?.()
+            onSeekBlockedRef.current?.()
           }
         })
 

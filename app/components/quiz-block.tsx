@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CheckCircle2, XCircle, HelpCircle, ChevronRight } from 'lucide-react'
+import { CheckCircle2, XCircle, HelpCircle } from 'lucide-react'
 import { Button } from './ui/button'
 import { cn } from '~/lib/utils'
 
@@ -31,11 +31,13 @@ export function QuizBlock({
     setResult(isCorrect ? 'correct' : 'wrong')
     onSubmit?.(selected, isCorrect)
 
-    if (!isCorrect) {
-      // Single attempt: show wrong state briefly, then replay video
+    if (isCorrect) {
+      // Auto-advance to next question after brief feedback
+      setTimeout(() => onCorrect(), 1200)
+    } else {
+      // Show wrong state briefly, then replay video
       setTimeout(() => onWrong(), 1500)
     }
-    // Correct: wait for user to click "Продолжить"
   }
 
   return (
@@ -116,13 +118,8 @@ export function QuizBlock({
           </div>
         )}
 
-        <div className="mt-5 flex justify-end">
-          {result === 'correct' ? (
-            <Button onClick={onCorrect} size="lg">
-              Продолжить
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          ) : (
+        {!result && (
+          <div className="mt-5 flex justify-end">
             <Button
               onClick={handleSubmit}
               disabled={selected === null || isSubmitting}
@@ -130,8 +127,8 @@ export function QuizBlock({
             >
               Подтвердить ответ
             </Button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   )
