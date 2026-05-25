@@ -9,6 +9,9 @@ import {
   Building2,
   Shield,
   ChevronLeft,
+  Settings,
+  Globe,
+  FileDown,
 } from 'lucide-react'
 import { useState } from 'react'
 import { cn } from '~/lib/utils'
@@ -18,9 +21,10 @@ interface SidebarProps {
   userName: string
   companyName?: string
   onLogout: () => void
+  onNavClick?: () => void
 }
 
-export function Sidebar({ role, userName, companyName, onLogout }: SidebarProps) {
+export function Sidebar({ role, userName, companyName, onLogout, onNavClick }: SidebarProps) {
   const location = useLocation()
   const [collapsed, setCollapsed] = useState(false)
 
@@ -29,10 +33,13 @@ export function Sidebar({ role, userName, companyName, onLogout }: SidebarProps)
     { to: '/admin/employees', icon: Users, label: 'Сотрудники' },
     { to: '/admin/courses', icon: BookOpen, label: 'Курсы' },
     { to: '/admin/statistics', icon: BarChart3, label: 'Статистика' },
+    { to: '/admin/hr-report', icon: FileDown, label: 'HR-отчёт' },
+    { to: '/admin/settings', icon: Settings, label: 'Настройки' },
   ]
 
   const superLinks = [
     { to: '/super', icon: LayoutDashboard, label: 'Дашборд' },
+    { to: '/super/landing', icon: Globe, label: 'Лендинг' },
   ]
 
   const links = role === 'super_admin' ? superLinks : adminLinks
@@ -79,6 +86,7 @@ export function Sidebar({ role, userName, companyName, onLogout }: SidebarProps)
             <Link
               key={link.to}
               to={link.to}
+              onClick={onNavClick}
               className={cn(
                 'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors',
                 isActive

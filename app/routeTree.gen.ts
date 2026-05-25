@@ -15,8 +15,11 @@ import { Route as AdminRouteRouteImport } from './routes/admin/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SuperIndexRouteImport } from './routes/super/index'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
+import { Route as SuperLandingRouteImport } from './routes/super/landing'
 import { Route as LearnTokenRouteImport } from './routes/learn/$token'
 import { Route as AdminStatisticsRouteImport } from './routes/admin/statistics'
+import { Route as AdminSettingsRouteImport } from './routes/admin/settings'
+import { Route as AdminHrReportRouteImport } from './routes/admin/hr-report'
 import { Route as AdminEmployeesRouteImport } from './routes/admin/employees'
 import { Route as AdminCoursesIndexRouteImport } from './routes/admin/courses/index'
 import { Route as AdminCoursesCourseIdRouteImport } from './routes/admin/courses/$courseId'
@@ -51,6 +54,11 @@ const AdminIndexRoute = AdminIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AdminRouteRoute,
 } as any)
+const SuperLandingRoute = SuperLandingRouteImport.update({
+  id: '/landing',
+  path: '/landing',
+  getParentRoute: () => SuperRouteRoute,
+} as any)
 const LearnTokenRoute = LearnTokenRouteImport.update({
   id: '/learn/$token',
   path: '/learn/$token',
@@ -59,6 +67,16 @@ const LearnTokenRoute = LearnTokenRouteImport.update({
 const AdminStatisticsRoute = AdminStatisticsRouteImport.update({
   id: '/statistics',
   path: '/statistics',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
+const AdminSettingsRoute = AdminSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
+const AdminHrReportRoute = AdminHrReportRouteImport.update({
+  id: '/hr-report',
+  path: '/hr-report',
   getParentRoute: () => AdminRouteRoute,
 } as any)
 const AdminEmployeesRoute = AdminEmployeesRouteImport.update({
@@ -83,8 +101,11 @@ export interface FileRoutesByFullPath {
   '/super': typeof SuperRouteRouteWithChildren
   '/login': typeof LoginRoute
   '/admin/employees': typeof AdminEmployeesRoute
+  '/admin/hr-report': typeof AdminHrReportRoute
+  '/admin/settings': typeof AdminSettingsRoute
   '/admin/statistics': typeof AdminStatisticsRoute
   '/learn/$token': typeof LearnTokenRoute
+  '/super/landing': typeof SuperLandingRoute
   '/admin/': typeof AdminIndexRoute
   '/super/': typeof SuperIndexRoute
   '/admin/courses/$courseId': typeof AdminCoursesCourseIdRoute
@@ -94,8 +115,11 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/admin/employees': typeof AdminEmployeesRoute
+  '/admin/hr-report': typeof AdminHrReportRoute
+  '/admin/settings': typeof AdminSettingsRoute
   '/admin/statistics': typeof AdminStatisticsRoute
   '/learn/$token': typeof LearnTokenRoute
+  '/super/landing': typeof SuperLandingRoute
   '/admin': typeof AdminIndexRoute
   '/super': typeof SuperIndexRoute
   '/admin/courses/$courseId': typeof AdminCoursesCourseIdRoute
@@ -108,8 +132,11 @@ export interface FileRoutesById {
   '/super': typeof SuperRouteRouteWithChildren
   '/login': typeof LoginRoute
   '/admin/employees': typeof AdminEmployeesRoute
+  '/admin/hr-report': typeof AdminHrReportRoute
+  '/admin/settings': typeof AdminSettingsRoute
   '/admin/statistics': typeof AdminStatisticsRoute
   '/learn/$token': typeof LearnTokenRoute
+  '/super/landing': typeof SuperLandingRoute
   '/admin/': typeof AdminIndexRoute
   '/super/': typeof SuperIndexRoute
   '/admin/courses/$courseId': typeof AdminCoursesCourseIdRoute
@@ -123,8 +150,11 @@ export interface FileRouteTypes {
     | '/super'
     | '/login'
     | '/admin/employees'
+    | '/admin/hr-report'
+    | '/admin/settings'
     | '/admin/statistics'
     | '/learn/$token'
+    | '/super/landing'
     | '/admin/'
     | '/super/'
     | '/admin/courses/$courseId'
@@ -134,8 +164,11 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/admin/employees'
+    | '/admin/hr-report'
+    | '/admin/settings'
     | '/admin/statistics'
     | '/learn/$token'
+    | '/super/landing'
     | '/admin'
     | '/super'
     | '/admin/courses/$courseId'
@@ -147,8 +180,11 @@ export interface FileRouteTypes {
     | '/super'
     | '/login'
     | '/admin/employees'
+    | '/admin/hr-report'
+    | '/admin/settings'
     | '/admin/statistics'
     | '/learn/$token'
+    | '/super/landing'
     | '/admin/'
     | '/super/'
     | '/admin/courses/$courseId'
@@ -207,6 +243,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminIndexRouteImport
       parentRoute: typeof AdminRouteRoute
     }
+    '/super/landing': {
+      id: '/super/landing'
+      path: '/landing'
+      fullPath: '/super/landing'
+      preLoaderRoute: typeof SuperLandingRouteImport
+      parentRoute: typeof SuperRouteRoute
+    }
     '/learn/$token': {
       id: '/learn/$token'
       path: '/learn/$token'
@@ -219,6 +262,20 @@ declare module '@tanstack/react-router' {
       path: '/statistics'
       fullPath: '/admin/statistics'
       preLoaderRoute: typeof AdminStatisticsRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
+    '/admin/settings': {
+      id: '/admin/settings'
+      path: '/settings'
+      fullPath: '/admin/settings'
+      preLoaderRoute: typeof AdminSettingsRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
+    '/admin/hr-report': {
+      id: '/admin/hr-report'
+      path: '/hr-report'
+      fullPath: '/admin/hr-report'
+      preLoaderRoute: typeof AdminHrReportRouteImport
       parentRoute: typeof AdminRouteRoute
     }
     '/admin/employees': {
@@ -247,6 +304,8 @@ declare module '@tanstack/react-router' {
 
 interface AdminRouteRouteChildren {
   AdminEmployeesRoute: typeof AdminEmployeesRoute
+  AdminHrReportRoute: typeof AdminHrReportRoute
+  AdminSettingsRoute: typeof AdminSettingsRoute
   AdminStatisticsRoute: typeof AdminStatisticsRoute
   AdminIndexRoute: typeof AdminIndexRoute
   AdminCoursesCourseIdRoute: typeof AdminCoursesCourseIdRoute
@@ -255,6 +314,8 @@ interface AdminRouteRouteChildren {
 
 const AdminRouteRouteChildren: AdminRouteRouteChildren = {
   AdminEmployeesRoute: AdminEmployeesRoute,
+  AdminHrReportRoute: AdminHrReportRoute,
+  AdminSettingsRoute: AdminSettingsRoute,
   AdminStatisticsRoute: AdminStatisticsRoute,
   AdminIndexRoute: AdminIndexRoute,
   AdminCoursesCourseIdRoute: AdminCoursesCourseIdRoute,
@@ -266,10 +327,12 @@ const AdminRouteRouteWithChildren = AdminRouteRoute._addFileChildren(
 )
 
 interface SuperRouteRouteChildren {
+  SuperLandingRoute: typeof SuperLandingRoute
   SuperIndexRoute: typeof SuperIndexRoute
 }
 
 const SuperRouteRouteChildren: SuperRouteRouteChildren = {
+  SuperLandingRoute: SuperLandingRoute,
   SuperIndexRoute: SuperIndexRoute,
 }
 

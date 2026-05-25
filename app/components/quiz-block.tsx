@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CheckCircle2, XCircle, AlertTriangle, HelpCircle } from 'lucide-react'
+import { CheckCircle2, XCircle, HelpCircle, ChevronRight } from 'lucide-react'
 import { Button } from './ui/button'
 import { cn } from '~/lib/utils'
 
@@ -7,20 +7,18 @@ interface QuizBlockProps {
   question: string
   options: string[]
   correctIndex: number
-  attemptNumber: number
   onCorrect: () => void
-  onFirstWrong: () => void
-  onSecondWrong: () => void
+  onWrong: () => void
+  onSubmit?: (selectedIndex: number, isCorrect: boolean) => void
 }
 
 export function QuizBlock({
   question,
   options,
   correctIndex,
-  attemptNumber,
   onCorrect,
-  onFirstWrong,
-  onSecondWrong,
+  onWrong,
+  onSubmit,
 }: QuizBlockProps) {
   const [selected, setSelected] = useState<number | null>(null)
   const [result, setResult] = useState<'correct' | 'wrong' | null>(null)
@@ -29,22 +27,15 @@ export function QuizBlock({
   const handleSubmit = () => {
     if (selected === null || isSubmitting) return
     setIsSubmitting(true)
-
     const isCorrect = selected === correctIndex
     setResult(isCorrect ? 'correct' : 'wrong')
+    onSubmit?.(selected, isCorrect)
 
-    setTimeout(() => {
-      if (isCorrect) {
-        onCorrect()
-      } else if (attemptNumber === 1) {
-        onFirstWrong()
-        setSelected(null)
-        setResult(null)
-        setIsSubmitting(false)
-      } else {
-        onSecondWrong()
-      }
-    }, 1500)
+    if (!isCorrect) {
+      // Single attempt: show wrong state briefly, then replay video
+      setTimeout(() => onWrong(), 1500)
+    }
+    // Correct: wait for user to click "Продолжить"
   }
 
   return (
@@ -109,15 +100,6 @@ export function QuizBlock({
           ))}
         </div>
 
-        {result === 'wrong' && attemptNumber === 1 && (
-          <div className="mt-4 flex items-center gap-2 rounded-xl bg-warning-light p-3 animate-fade-in">
-            <AlertTriangle className="h-4 w-4 text-warning shrink-0" />
-            <p className="text-sm text-warning">
-              Ответ неверный. У вас осталась ещё одна попытка.
-            </p>
-          </div>
-        )}
-
         {result === 'correct' && (
           <div className="mt-4 flex items-center gap-2 rounded-xl bg-success-light p-3 animate-fade-in">
             <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
@@ -125,17 +107,30 @@ export function QuizBlock({
           </div>
         )}
 
-        <div className="mt-5 flex items-center justify-between">
-          <p className="text-xs text-text-muted">
-            Попытка {attemptNumber} из 2
-          </p>
-          <Button
-            onClick={handleSubmit}
-            disabled={selected === null || isSubmitting}
-            size="lg"
-          >
-            Подтвердить ответ
-          </Button>
+        {result === 'wrong' && (
+          <div className="mt-4 flex items-center gap-2 rounded-xl bg-danger-light p-3 animate-fade-in">
+            <XCircle className="h-4 w-4 text-danger shrink-0" />
+            <p className="text-sm text-danger">
+              Неверный ответ. Видео повторится с нужного момента.
+            </p>
+          </div>
+        )}
+
+        <div className="mt-5 flex justify-end">
+          {result === 'correct' ? (
+            <Button onClick={onCorrect} size="lg">
+              Продолжить
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          ) : (
+            <Button
+              onClick={handleSubmit}
+              disabled={selected === null || isSubmitting}
+              size="lg"
+            >
+              Подтвердить ответ
+            </Button>
+          )}
         </div>
       </div>
     </div>
