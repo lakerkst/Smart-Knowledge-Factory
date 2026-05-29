@@ -33,6 +33,7 @@ import { getCompanyStatsFn, getQuestionStatsFn, getActivityLogFn, getHrReportFn 
 import { getLessonFeedbackStatsFn } from '~/lib/server-fns/feedback'
 import { DateRangePicker, type DateRange } from '~/components/ui/date-range-picker'
 import { formatDate, cn } from '~/lib/utils'
+import { useTranslation } from 'react-i18next'
 import {
   AreaChart,
   Area,
@@ -68,8 +69,7 @@ type EmpCourse = Emp['courses'][number]
 type EmpLesson = EmpCourse['lessons'][number]
 
 // ─── Legacy CSV export (employee summary) ────────────────────────────────────
-function exportCSV(employeeStats: Emp[]) {
-  const header = ['Сотрудник', 'Курсов', 'Всего уроков', 'Завершено', 'Прогресс %', 'Последний вход']
+function exportCSV(employeeStats: Emp[], header: string[]) {
   const rows = employeeStats.map((emp) => [
     emp.name,
     emp.courses.length,
@@ -97,7 +97,9 @@ function defaultRange14(): DateRange {
 }
 
 function StatisticsPage() {
+  const { t } = useTranslation()
   const { stats, questionStats, companyId, feedbackStats, hrReport } = Route.useLoaderData()
+  const { features } = Route.useRouteContext()
   const [selectedEmp, setSelectedEmp] = useState<Emp | null>(null)
   const [search, setSearch] = useState('')
 
@@ -134,15 +136,15 @@ function StatisticsPage() {
 
   return (
     <div>
-      <Topbar title="Статистика" subtitle="Аналитика обучения компании" />
+      <Topbar title={t('statistics.title')} subtitle={t('statistics.subtitle')} />
 
       <div className="p-6">
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {[
-            { title: 'Сотрудники', value: stats.totals.employees, icon: Users, subtitle: 'В компании' },
-            { title: 'Курсы', value: stats.totals.courses, icon: BookOpen, subtitle: 'Опубликовано' },
-            { title: 'Уроков', value: stats.totals.lessons, icon: GraduationCap, subtitle: 'Всего' },
-            { title: 'Завершили', value: stats.totals.completed, icon: CheckCircle2, subtitle: `Из ${stats.totals.employees} сотрудников` },
+            { title: t('nav.employees'), value: stats.totals.employees, icon: Users, subtitle: t('statistics.employeesInCompany') },
+            { title: t('nav.courses'), value: stats.totals.courses, icon: BookOpen, subtitle: t('statistics.published') },
+            { title: t('common.lessons'), value: stats.totals.lessons, icon: GraduationCap, subtitle: t('statistics.totalLessons') },
+            { title: t('dashboard.completedTraining'), value: stats.totals.completed, icon: CheckCircle2, subtitle: t('statistics.completedOf', { count: stats.totals.employees }) },
           ].map((metric, i) => (
             <div
               key={metric.title}
@@ -154,21 +156,23 @@ function StatisticsPage() {
           ))}
         </div>
 
+        {(features.statActivity || features.statEmployeeStatus) && (
         <div className="mt-6 grid gap-6 lg:grid-cols-2">
+          {features.statActivity && (
           <div className="animate-fade-in" style={{ animationDelay: '0.2s', animationFillMode: 'both' }}>
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center justify-between flex-wrap gap-3">
                   <span className="flex items-center gap-2">
                     <TrendingUp className="h-5 w-5 text-primary" />
-                    Активность
+                    {t('statistics.activity')}
                   </span>
                   <DateRangePicker value={activityRange} onChange={setActivityRange} />
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 {activityLoading ? (
-                  <div className="flex h-[280px] items-center justify-center text-sm text-text-muted">Загрузка...</div>
+                  <div className="flex h-[280px] items-center justify-center text-sm text-text-muted">{t('common.loading')}</div>
                 ) : (
                 <ResponsiveContainer width="100%" height={280}>
                   <AreaChart data={activityData}>
@@ -186,26 +190,28 @@ function StatisticsPage() {
                     <XAxis
                       dataKey="date"
                       tick={{ fontSize: 11, fill: 'oklch(0.60 0.015 250)' }}
-                      tickFormatter={(v) => new Date(v).toLocaleDateString('ru', { day: 'numeric', month: 'short' })}
+                      tickFormatter={(v) => new Date(v).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
                     />
                     <YAxis tick={{ fontSize: 11, fill: 'oklch(0.60 0.015 250)' }} />
                     <Tooltip contentStyle={{ backgroundColor: 'white', border: '1px solid oklch(0.90 0.01 250)', borderRadius: '12px', fontSize: '12px' }} />
                     <Legend />
-                    <Area type="monotone" dataKey="logins" name="Входы" stroke="oklch(0.55 0.18 250)" fill="url(#colorActivity)" strokeWidth={2} />
-                    <Area type="monotone" dataKey="lessonsCompleted" name="Уроки" stroke="oklch(0.65 0.17 145)" fill="url(#colorLessons)" strokeWidth={2} />
+                    <Area type="monotone" dataKey="logins" name={t('statistics.loginsChart')} stroke="oklch(0.55 0.18 250)" fill="url(#colorActivity)" strokeWidth={2} />
+                    <Area type="monotone" dataKey="lessonsCompleted" name={t('statistics.lessonsChart')} stroke="oklch(0.65 0.17 145)" fill="url(#colorLessons)" strokeWidth={2} />
                   </AreaChart>
                 </ResponsiveContainer>
                 )}
               </CardContent>
             </Card>
           </div>
+          )}
 
+          {features.statEmployeeStatus && (
           <div className="animate-fade-in" style={{ animationDelay: '0.25s', animationFillMode: 'both' }}>
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Users className="h-5 w-5 text-primary" />
-                  Статусы сотрудников
+                  {t('statistics.employeeStatuses')}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -231,14 +237,17 @@ function StatisticsPage() {
               </CardContent>
             </Card>
           </div>
+          )}
         </div>
+        )}
 
+        {features.statCourseProgress && (
         <div className="mt-6 animate-fade-in" style={{ animationDelay: '0.3s', animationFillMode: 'both' }}>
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <BookOpen className="h-5 w-5 text-primary" />
-                Прогресс по курсам
+                {t('statistics.courseProgress')}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -248,22 +257,23 @@ function StatisticsPage() {
                   <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11, fill: 'oklch(0.60 0.015 250)' }} />
                   <YAxis type="category" dataKey="name" width={160} tick={{ fontSize: 11, fill: 'oklch(0.45 0.02 250)' }} />
                   <Tooltip contentStyle={{ backgroundColor: 'white', border: '1px solid oklch(0.90 0.01 250)', borderRadius: '12px', fontSize: '12px' }} />
-                  <Bar dataKey="progress" name="Прогресс %" fill="oklch(0.55 0.18 250)" radius={[0, 6, 6, 0]} />
+                  <Bar dataKey="progress" name={t('statistics.progressPercent')} fill="oklch(0.55 0.18 250)" radius={[0, 6, 6, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </CardContent>
           </Card>
         </div>
+        )}
 
         {/* Question analytics */}
-        {questionStats.length > 0 && (
+        {features.statHardQuestions && questionStats.length > 0 && (
           <div className="mt-6 animate-fade-in" style={{ animationDelay: '0.33s', animationFillMode: 'both' }}>
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <AlertTriangle className="h-5 w-5 text-warning" />
-                  Сложные вопросы
-                  <span className="ml-auto text-xs font-normal text-text-muted">топ-15 по % ошибок с первой попытки</span>
+                  {t('statistics.hardQuestions')}
+                  <span className="ml-auto text-xs font-normal text-text-muted">{t('statistics.hardQuestionsHint')}</span>
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -271,10 +281,10 @@ function StatisticsPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border-light text-xs font-semibold uppercase tracking-wider text-text-muted">
-                        <th className="pb-2.5 pr-4 text-left">Вопрос</th>
-                        <th className="pb-2.5 pr-4 text-left">Урок / Курс</th>
-                        <th className="pb-2.5 pr-3 text-right w-20">Попыток</th>
-                        <th className="pb-2.5 text-right w-28">% ошибок</th>
+                        <th className="pb-2.5 pr-4 text-left">{t('statistics.question')}</th>
+                        <th className="pb-2.5 pr-4 text-left">{t('statistics.lessonCourse')}</th>
+                        <th className="pb-2.5 pr-3 text-right w-20">{t('statistics.attempts')}</th>
+                        <th className="pb-2.5 text-right w-28">{t('statistics.errorPercent')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -315,13 +325,14 @@ function StatisticsPage() {
         )}
 
         {/* Feedback / Ratings */}
-        {feedbackStats.lessonStats.length > 0 && (
+        {(features.statLessonRating || features.statComments) && feedbackStats.lessonStats.length > 0 && (
           <div className="mt-6 grid gap-6 lg:grid-cols-2 animate-fade-in" style={{ animationDelay: '0.3s', animationFillMode: 'both' }}>
+            {features.statLessonRating && (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Star className="h-5 w-5 text-warning" />
-                  Рейтинг уроков
+                  {t('statistics.lessonRating')}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -342,24 +353,26 @@ function StatisticsPage() {
                               {ls.avgRating != null ? ls.avgRating.toFixed(1) : '—'}
                             </span>
                           </div>
-                          <p className="text-xs text-text-muted">{ls.feedbackCount} оценок</p>
+                          <p className="text-xs text-text-muted">{t('statistics.ratingsCount', { count: ls.feedbackCount })}</p>
                         </div>
                       </div>
                     ))}
                 </div>
               </CardContent>
             </Card>
+            )}
 
+            {features.statComments && (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <MessageSquare className="h-5 w-5 text-primary" />
-                  Последние комментарии
+                  {t('statistics.recentComments')}
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 {feedbackStats.recentComments.length === 0 ? (
-                  <p className="text-sm text-text-muted py-4 text-center">Комментариев пока нет</p>
+                  <p className="text-sm text-text-muted py-4 text-center">{t('statistics.noComments')}</p>
                 ) : (
                   <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
                     {feedbackStats.recentComments.map((c) => (
@@ -383,16 +396,18 @@ function StatisticsPage() {
                 )}
               </CardContent>
             </Card>
+            )}
           </div>
         )}
 
         {/* Employee list — click to drill down */}
+        {features.statEmployeeProgress && (
         <div className="mt-6 animate-fade-in" style={{ animationDelay: '0.4s', animationFillMode: 'both' }}>
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Users className="h-5 w-5 text-primary" />
-                Прогресс по сотрудникам
+                {t('statistics.employeeProgress')}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -403,14 +418,14 @@ function StatisticsPage() {
                   <Input
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Поиск по имени..."
+                    placeholder={t('statistics.searchByName')}
                     className="pl-9"
                   />
                 </div>
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => exportCSV(stats.employeeStats)}
+                  onClick={() => exportCSV(stats.employeeStats, t('statistics.exportHeader', { returnObjects: true }) as string[])}
                   className="shrink-0"
                 >
                   <Download className="h-3.5 w-3.5" />
@@ -419,9 +434,9 @@ function StatisticsPage() {
               </div>
 
               {stats.employeeStats.length === 0 ? (
-                <p className="py-4 text-center text-sm text-text-muted">Нет сотрудников</p>
+                <p className="py-4 text-center text-sm text-text-muted">{t('statistics.noEmployees')}</p>
               ) : filteredEmployees.length === 0 ? (
-                <p className="py-4 text-center text-sm text-text-muted">Нет результатов</p>
+                <p className="py-4 text-center text-sm text-text-muted">{t('common.noResults')}</p>
               ) : (
                 <div className="space-y-2">
                   {filteredEmployees.map((emp) => (
@@ -438,7 +453,7 @@ function StatisticsPage() {
                           <p className="text-sm font-medium text-text truncate">{emp.name}</p>
                           {overdueEmployeeIds.has(emp.id) && (
                             <Badge variant="danger" className="shrink-0 text-[10px] px-1.5 py-0">
-                              Просрочено
+                              {t('statistics.overdue')}
                             </Badge>
                           )}
                           <div className="ml-auto flex items-center gap-2 shrink-0">
@@ -458,6 +473,7 @@ function StatisticsPage() {
             </CardContent>
           </Card>
         </div>
+        )}
       </div>
 
       {/* Employee detail dialog */}
@@ -469,11 +485,11 @@ function StatisticsPage() {
                 <DialogTitle className="flex items-center gap-2">
                   {selectedEmp.name}
                   {overdueEmployeeIds.has(selectedEmp.id) && (
-                    <Badge variant="danger" className="text-xs">Просрочено</Badge>
+                    <Badge variant="danger" className="text-xs">{t('statistics.overdue')}</Badge>
                   )}
                 </DialogTitle>
                 <DialogDescription className="flex items-center gap-4">
-                  <span>{selectedEmp.completedLessons}/{selectedEmp.totalLessons} уроков</span>
+                  <span>{t('statistics.lessonsOf', { completed: selectedEmp.completedLessons, total: selectedEmp.totalLessons })}</span>
                   {selectedEmp.lastLoginAt && (
                     <span className="flex items-center gap-1">
                       <Clock className="h-3.5 w-3.5" />
@@ -485,7 +501,7 @@ function StatisticsPage() {
 
               <div className="mt-1 space-y-4">
                 {selectedEmp.courses.length === 0 ? (
-                  <p className="text-sm text-text-muted">Курсы не назначены</p>
+                  <p className="text-sm text-text-muted">{t('statistics.coursesNotAssigned')}</p>
                 ) : (
                   selectedEmp.courses.map((course: EmpCourse) => (
                     <div key={course.courseId}>
@@ -502,8 +518,8 @@ function StatisticsPage() {
                               : 'bg-surface-dim text-text-muted'
                           )}>
                             <Calendar className="h-3 w-3 shrink-0" />
-                            До {formatDate(course.deadline)}
-                            {course.isOverdue && ' · Просрочено'}
+                            {t('statistics.untilDate', { date: formatDate(course.deadline) })}
+                            {course.isOverdue && ` · ${t('statistics.overdueText')}`}
                           </span>
                         )}
                       </div>
@@ -528,7 +544,7 @@ function StatisticsPage() {
                               )}
                               {lesson.attemptCount > 0 && (
                                 <p className="text-xs text-text-muted">
-                                  {lesson.attemptCount} попыт.
+                                  {t('statistics.attemptsShort', { count: lesson.attemptCount })}
                                 </p>
                               )}
                             </div>

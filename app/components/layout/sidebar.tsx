@@ -12,8 +12,10 @@ import {
   Settings,
   Globe,
   FileDown,
+  Sliders,
 } from 'lucide-react'
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '~/lib/utils'
 
 interface SidebarProps {
@@ -27,19 +29,21 @@ interface SidebarProps {
 export function Sidebar({ role, userName, companyName, onLogout, onNavClick }: SidebarProps) {
   const location = useLocation()
   const [collapsed, setCollapsed] = useState(false)
+  const { t, i18n } = useTranslation()
 
   const adminLinks = [
-    { to: '/admin', icon: LayoutDashboard, label: 'Дашборд' },
-    { to: '/admin/employees', icon: Users, label: 'Сотрудники' },
-    { to: '/admin/courses', icon: BookOpen, label: 'Курсы' },
-    { to: '/admin/statistics', icon: BarChart3, label: 'Статистика' },
-    { to: '/admin/hr-report', icon: FileDown, label: 'HR-отчёт' },
-    { to: '/admin/settings', icon: Settings, label: 'Настройки' },
+    { to: '/admin', icon: LayoutDashboard, label: t('nav.dashboard') },
+    { to: '/admin/employees', icon: Users, label: t('nav.employees') },
+    { to: '/admin/courses', icon: BookOpen, label: t('nav.courses') },
+    { to: '/admin/statistics', icon: BarChart3, label: t('nav.statistics') },
+    { to: '/admin/hr-report', icon: FileDown, label: t('nav.hrReport') },
+    { to: '/admin/settings', icon: Settings, label: t('nav.settings') },
   ]
 
   const superLinks = [
-    { to: '/super', icon: LayoutDashboard, label: 'Дашборд' },
-    { to: '/super/landing', icon: Globe, label: 'Лендинг' },
+    { to: '/super', icon: LayoutDashboard, label: t('nav.dashboard') },
+    { to: '/super/landing', icon: Globe, label: t('nav.landing') },
+    { to: '/super/func-company', icon: Sliders, label: t('nav.funcCompany') },
   ]
 
   const links = role === 'super_admin' ? superLinks : adminLinks
@@ -59,7 +63,7 @@ export function Sidebar({ role, userName, companyName, onLogout, onNavClick }: S
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold text-text">SKF</p>
             <p className="truncate text-xs text-text-muted">
-              {role === 'super_admin' ? 'Супер-админ' : companyName}
+              {role === 'super_admin' ? t('nav.superAdmin') : companyName}
             </p>
           </div>
         )}
@@ -102,6 +106,24 @@ export function Sidebar({ role, userName, companyName, onLogout, onNavClick }: S
       </nav>
 
       <div className="border-t border-border-light p-3">
+        {/* Language switcher */}
+        <div className={cn('mb-2 flex items-center rounded-xl bg-surface-dim p-1', collapsed && 'flex-col gap-1')}>
+          {(['ru', 'kk'] as const).map((lng) => (
+            <button
+              key={lng}
+              onClick={() => i18n.changeLanguage(lng)}
+              className={cn(
+                'flex-1 rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors',
+                i18n.language === lng
+                  ? 'bg-white text-primary shadow-sm'
+                  : 'text-text-muted hover:text-text'
+              )}
+            >
+              {t(`lang.${lng}`)}
+            </button>
+          ))}
+        </div>
+
         <div
           className={cn(
             'flex items-center gap-3 rounded-xl px-3 py-2',
@@ -121,11 +143,11 @@ export function Sidebar({ role, userName, companyName, onLogout, onNavClick }: S
               <p className="truncate text-xs text-text-muted">
                 {role === 'super_admin' ? (
                   <span className="flex items-center gap-1">
-                    <Shield className="h-3 w-3" /> Супер-админ
+                    <Shield className="h-3 w-3" /> {t('nav.superAdmin')}
                   </span>
                 ) : (
                   <span className="flex items-center gap-1">
-                    <Building2 className="h-3 w-3" /> Админ
+                    <Building2 className="h-3 w-3" /> {t('nav.admin')}
                   </span>
                 )}
               </p>
@@ -140,7 +162,7 @@ export function Sidebar({ role, userName, companyName, onLogout, onNavClick }: S
           )}
         >
           <LogOut className="h-4 w-4 shrink-0" />
-          {!collapsed && <span>Выйти</span>}
+          {!collapsed && <span>{t('nav.logout')}</span>}
         </button>
       </div>
     </aside>

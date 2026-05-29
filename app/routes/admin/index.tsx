@@ -1,4 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { useTranslation } from 'react-i18next'
 import {
   Users,
   BookOpen,
@@ -36,6 +37,7 @@ export const Route = createFileRoute('/admin/')({
 })
 
 function AdminDashboard() {
+  const { t } = useTranslation()
   const { stats, employees } = Route.useLoaderData()
 
   const recentEmployees = employees
@@ -45,39 +47,39 @@ function AdminDashboard() {
 
   return (
     <div>
-      <Topbar title="Дашборд" subtitle="Обзор обучения в вашей компании" />
+      <Topbar title={t('nav.dashboard')} subtitle={t('dashboard.subtitle')} />
 
       <div className="p-6">
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <div className="animate-fade-in" style={{ animationDelay: '0s', animationFillMode: 'both' }}>
             <MetricCard
-              title="Сотрудники"
+              title={t('dashboard.employees')}
               value={stats.totals.employees}
-              subtitle="Всего в компании"
+              subtitle={t('dashboard.employeesSubtitle')}
               icon={Users}
             />
           </div>
           <div className="animate-fade-in" style={{ animationDelay: '0.05s', animationFillMode: 'both' }}>
             <MetricCard
-              title="Курсы"
+              title={t('nav.courses')}
               value={stats.totals.courses}
-              subtitle="Опубликовано"
+              subtitle={t('dashboard.coursesSubtitle')}
               icon={BookOpen}
             />
           </div>
           <div className="animate-fade-in" style={{ animationDelay: '0.1s', animationFillMode: 'both' }}>
             <MetricCard
-              title="Завершили обучение"
+              title={t('dashboard.completedTraining')}
               value={stats.totals.completed}
-              subtitle={`Из ${stats.totals.employees} сотрудников`}
+              subtitle={t('dashboard.completedSubtitle', { count: stats.totals.employees })}
               icon={GraduationCap}
             />
           </div>
           <div className="animate-fade-in" style={{ animationDelay: '0.15s', animationFillMode: 'both' }}>
             <MetricCard
-              title="В процессе"
+              title={t('dashboard.inProgress')}
               value={stats.totals.inProgress}
-              subtitle="Проходят курсы"
+              subtitle={t('dashboard.inProgressSubtitle')}
               icon={TrendingUp}
             />
           </div>
@@ -89,7 +91,7 @@ function AdminDashboard() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <TrendingUp className="h-5 w-5 text-primary" />
-                  Активность за 14 дней
+                  {t('dashboard.activity14days')}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -105,7 +107,7 @@ function AdminDashboard() {
                     <XAxis
                       dataKey="date"
                       tick={{ fontSize: 11, fill: 'oklch(0.60 0.015 250)' }}
-                      tickFormatter={(v) => new Date(v).toLocaleDateString('ru', { day: 'numeric', month: 'short' })}
+                      tickFormatter={(v) => new Date(v).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
                     />
                     <YAxis tick={{ fontSize: 11, fill: 'oklch(0.60 0.015 250)' }} />
                     <Tooltip
@@ -119,7 +121,7 @@ function AdminDashboard() {
                     <Area
                       type="monotone"
                       dataKey="logins"
-                      name="Входы"
+                      name={t('dashboard.logins')}
                       stroke="oklch(0.55 0.18 250)"
                       fill="url(#colorLogins)"
                       strokeWidth={2}
@@ -135,7 +137,7 @@ function AdminDashboard() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Clock className="h-5 w-5 text-primary" />
-                  Недавняя активность
+                  {t('dashboard.recentActivity')}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -153,7 +155,7 @@ function AdminDashboard() {
                         </div>
                       </div>
                       <Badge variant={emp.progress === 100 ? 'success' : emp.progress > 0 ? 'warning' : 'secondary'}>
-                        {emp.progress === 100 ? 'Готово' : emp.progress > 0 ? 'Учится' : 'Новый'}
+                        {emp.progress === 100 ? t('dashboard.ready') : emp.progress > 0 ? t('dashboard.studying') : t('dashboard.new')}
                       </Badge>
                     </div>
                   ))}
@@ -168,7 +170,7 @@ function AdminDashboard() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <BookOpen className="h-5 w-5 text-primary" />
-                Прогресс по курсам
+                {t('dashboard.courseProgress')}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -178,7 +180,7 @@ function AdminDashboard() {
                     <div className="flex items-center justify-between mb-2">
                       <div>
                         <p className="text-sm font-medium text-text">{course.title}</p>
-                        <p className="text-xs text-text-muted">{course.assignedCount} сотрудников назначено</p>
+                        <p className="text-xs text-text-muted">{t('dashboard.employeesAssigned', { count: course.assignedCount })}</p>
                       </div>
                       <span className="text-sm font-semibold text-text">{course.progress}%</span>
                     </div>

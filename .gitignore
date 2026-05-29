@@ -9,3 +9,6 @@ dist/
 .vercel
 .claude/
 app.config.timestamp_*
+
+.vercel
+.env*.local

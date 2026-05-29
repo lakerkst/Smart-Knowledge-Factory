@@ -1,10 +1,28 @@
 import { createServerFn } from '@tanstack/react-start'
 import { getCookie, setCookie, deleteCookie } from '@tanstack/react-start/server'
 import { eq, and } from 'drizzle-orm'
-import { compare } from 'bcryptjs'
+import { compare, hash } from 'bcryptjs'
 import { createToken, verifyToken } from '../auth'
 import { db } from '~/../db'
-import { users } from '~/../db/schema'
+import { users, activityLog } from '~/../db/schema'
+
+// ---- Simple in-memory rate limiter for token endpoint ----
+// Limits each token to RATE_LIMIT requests per window to prevent enumeration / abuse.
+const _rlMap = new Map<string, { count: number; resetAt: number }>()
+const RATE_LIMIT = 30
+const RATE_WINDOW_MS = 60_000 // 1 minute
+
+function tokenRateLimit(token: string): boolean {
+  const now = Date.now()
+  const entry = _rlMap.get(token)
+  if (!entry || now > entry.resetAt) {
+    _rlMap.set(token, { count: 1, resetAt: now + RATE_WINDOW_MS })
+    return true
+  }
+  if (entry.count >= RATE_LIMIT) return false
+  entry.count++
+  return true
+}
 
 export const loginFn = createServerFn({ method: 'POST' })
   .inputValidator((data: { email: string; password: string }) => data)
@@ -79,6 +97,11 @@ export const logoutFn = createServerFn({ method: 'POST' }).handler(async () => {
 export const getEmployeeByTokenFn = createServerFn({ method: 'GET' })
   .inputValidator((data: { token: string }) => data)
   .handler(async ({ data }) => {
+    // Rate-limit: block excessive requests for the same token
+    if (!tokenRateLimit(data.token)) {
+      return { employee: null }
+    }
+
     const [user] = await db
       .select()
       .from(users)
@@ -93,11 +116,21 @@ export const getEmployeeByTokenFn = createServerFn({ method: 'GET' })
 
     if (!user) return { employee: null }
 
-    // Update last login
-    await db
-      .update(users)
-      .set({ lastLoginAt: new Date() })
-      .where(eq(users.id, user.id))
+    const now = new Date()
+    // Only log a new session if the previous login was >30 min ago (dedup refreshes)
+    const isNewSession =
+      !user.lastLoginAt || now.getTime() - user.lastLoginAt.getTime() > 30 * 60 * 1000
+
+    await Promise.all([
+      db.update(users).set({ lastLoginAt: now }).where(eq(users.id, user.id)),
+      isNewSession && user.companyId
+        ? db.insert(activityLog).values({
+            userId: user.id,
+            companyId: user.companyId,
+            action: 'login',
+          })
+        : Promise.resolve(),
+    ])
 
     return {
       employee: {
@@ -106,4 +139,18 @@ export const getEmployeeByTokenFn = createServerFn({ method: 'GET' })
         companyId: user.companyId,
       },
     }
+  })
+
+export const changePasswordFn = createServerFn({ method: 'POST' })
+  .inputValidator((data: { userId: string; currentPassword: string; newPassword: string }) => data)
+  .handler(async ({ data }) => {
+    const [user] = await db.select().from(users).where(eq(users.id, data.userId)).limit(1)
+    if (!user || !user.passwordHash) return { error: 'Пользователь не найден' }
+
+    const valid = await compare(data.currentPassword, user.passwordHash)
+    if (!valid) return { error: 'Текущий пароль неверный' }
+
+    const newHash = await hash(data.newPassword, 10)
+    await db.update(users).set({ passwordHash: newHash, updatedAt: new Date() }).where(eq(users.id, data.userId))
+    return { success: true }
   })

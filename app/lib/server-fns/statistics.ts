@@ -1,5 +1,5 @@
 import { createServerFn } from '@tanstack/react-start'
-import { eq, and, sql, gte, lte, inArray } from 'drizzle-orm'
+import { eq, and, sql, gte, lte, inArray, asc } from 'drizzle-orm'
 import { db } from '~/../db'
 import {
   users,
@@ -520,6 +520,7 @@ export const getHrReportFn = createServerFn({ method: 'GET' })
       finalTestScore: number | null
       deadline: Date | null
       isOverdue: boolean
+      wrongCount: number
     }> = []
 
     const employees = await db
@@ -545,6 +546,41 @@ export const getHrReportFn = createServerFn({ method: 'GET' })
       db.select().from(lessonProgress).where(inArray(lessonProgress.userId, employeeIds)),
       db.select().from(finalTestAttempts).where(inArray(finalTestAttempts.userId, employeeIds)),
     ])
+
+    // Build wrongCount map: `${userId}_${courseId}` → count of wrong attempts
+    const allLessonIds = allLessons.map((l) => l.id)
+    const allQuestionsForCourses = allLessonIds.length
+      ? await db
+          .select({ id: questions.id, lessonId: questions.lessonId })
+          .from(questions)
+          .where(inArray(questions.lessonId, allLessonIds))
+      : []
+    const questionToCourse = new Map<string, string>()
+    for (const q of allQuestionsForCourses) {
+      const lesson = allLessons.find((l) => l.id === q.lessonId)
+      if (lesson) questionToCourse.set(q.id, lesson.courseId)
+    }
+    const allQuestionIds = allQuestionsForCourses.map((q) => q.id)
+    const wrongAttempts =
+      allQuestionIds.length && employeeIds.length
+        ? await db
+            .select({ userId: questionAttempts.userId, questionId: questionAttempts.questionId })
+            .from(questionAttempts)
+            .where(
+              and(
+                inArray(questionAttempts.userId, employeeIds),
+                inArray(questionAttempts.questionId, allQuestionIds),
+                eq(questionAttempts.isCorrect, false)
+              )
+            )
+        : []
+    const wrongCountMap = new Map<string, number>()
+    for (const wa of wrongAttempts) {
+      const courseId = questionToCourse.get(wa.questionId)
+      if (!courseId) continue
+      const key = `${wa.userId}_${courseId}`
+      wrongCountMap.set(key, (wrongCountMap.get(key) ?? 0) + 1)
+    }
 
     const now = new Date()
 
@@ -602,6 +638,7 @@ export const getHrReportFn = createServerFn({ method: 'GET' })
           finalTestScore: bestTest?.score ?? null,
           deadline,
           isOverdue,
+          wrongCount: wrongCountMap.get(`${emp.id}_${course.id}`) ?? 0,
         })
       }
     }
@@ -613,4 +650,66 @@ export const getHrReportFn = createServerFn({ method: 'GET' })
     })
 
     return { rows }
+  })
+
+// ─── Detailed stats for one employee × course (used in HR modal) ─────────────
+
+export const getEmployeeDetailFn = createServerFn({ method: 'GET' })
+  .inputValidator((data: { userId: string; courseId: string }) => data)
+  .handler(async ({ data }) => {
+    const courseLessons = await db
+      .select()
+      .from(lessons)
+      .where(eq(lessons.courseId, data.courseId))
+      .orderBy(asc(lessons.orderIndex))
+
+    if (!courseLessons.length) return { lessons: [] }
+    const lessonIds = courseLessons.map((l) => l.id)
+
+    const lessonQuestions = await db
+      .select()
+      .from(questions)
+      .where(inArray(questions.lessonId, lessonIds))
+      .orderBy(asc(questions.orderIndex))
+
+    const questionIds = lessonQuestions.map((q) => q.id)
+    const attempts = questionIds.length
+      ? await db
+          .select()
+          .from(questionAttempts)
+          .where(
+            and(
+              eq(questionAttempts.userId, data.userId),
+              inArray(questionAttempts.questionId, questionIds)
+            )
+          )
+      : []
+
+    // Aggregate per question: total and wrong attempt counts
+    const attemptsMap = new Map<string, { total: number; wrong: number }>()
+    for (const a of attempts) {
+      const entry = attemptsMap.get(a.questionId) ?? { total: 0, wrong: 0 }
+      entry.total++
+      if (!a.isCorrect) entry.wrong++
+      attemptsMap.set(a.questionId, entry)
+    }
+
+    const result = courseLessons.map((lesson) => ({
+      id: lesson.id,
+      title: lesson.title,
+      orderIndex: lesson.orderIndex,
+      questions: lessonQuestions
+        .filter((q) => q.lessonId === lesson.id)
+        .map((q) => {
+          const stats = attemptsMap.get(q.id)
+          return {
+            id: q.id,
+            text: q.text,
+            totalAttempts: stats?.total ?? 0,
+            wrongAttempts: stats?.wrong ?? 0,
+          }
+        }),
+    }))
+
+    return { lessons: result }
   })

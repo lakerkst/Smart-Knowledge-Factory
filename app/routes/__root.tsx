@@ -6,6 +6,10 @@ import {
 } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import appCss from '~/styles/app.css?url'
+import { Toaster } from '~/components/ui/toaster'
+import { ErrorBoundary } from '~/components/error-boundary'
+import '~/lib/i18n'
+import { useTranslation } from 'react-i18next'
 
 export const Route = createRootRoute({
   head: () => ({
@@ -29,13 +33,17 @@ export const Route = createRootRoute({
 })
 
 function RootDocument({ children }: { children: ReactNode }) {
+  const { i18n } = useTranslation()
   return (
-    <html lang="ru">
+    <html lang={i18n.language}>
       <head>
         <HeadContent />
       </head>
       <body>
-        {children}
+        <ErrorBoundary>
+          {children}
+        </ErrorBoundary>
+        <Toaster />
         <Scripts />
       </body>
     </html>

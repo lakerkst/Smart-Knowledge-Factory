@@ -1,5 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   GraduationCap,
   Play,
@@ -87,17 +88,18 @@ function LearnSkeleton() {
 
 type ViewState = 'welcome' | 'courses' | 'player' | 'finalTest'
 
-// Russian plural form for "курс"
-function formatCourses(n: number) {
-  if (n % 100 >= 11 && n % 100 <= 19) return `${n} курсов`
+// Pluralized course count — uses i18n keys learn.courseRu1/courseRu2/courseRu5
+function formatCourses(n: number, t: (key: string, opts?: Record<string, unknown>) => string) {
+  if (n % 100 >= 11 && n % 100 <= 19) return t('learn.courseRu5', { count: n })
   const r = n % 10
-  if (r === 1) return `${n} курс`
-  if (r >= 2 && r <= 4) return `${n} курса`
-  return `${n} курсов`
+  if (r === 1) return t('learn.courseRu1', { count: n })
+  if (r >= 2 && r <= 4) return t('learn.courseRu2', { count: n })
+  return t('learn.courseRu5', { count: n })
 }
 
 function LearnPage() {
   const { employee, courses, courseDetails, pathLockMap } = Route.useLoaderData()
+  const { t, i18n } = useTranslation()
 
   const [view, setView] = useState<ViewState>('welcome')
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null)
@@ -107,6 +109,10 @@ function LearnPage() {
   const [seekTo, setSeekTo] = useState<number | null>(null)
   const [isMinimized, setIsMinimized] = useState(false)
   const [courseCompleted, setCourseCompleted] = useState(false)
+  // Incremented on each replay to force VideoPlayer remount with maxAllowedPosition=0
+  const [replayCount, setReplayCount] = useState(0)
+  // Position to start replay from (0 = beginning, or timecodeStart)
+  const replayPositionRef = useRef(0)
 
   // Feedback state
   const [showFeedback, setShowFeedback] = useState(false)
@@ -121,8 +127,14 @@ function LearnPage() {
   const [ftCurrentQ, setFtCurrentQ] = useState(0)
   const [ftResult, setFtResult] = useState<{ score: number; passed: boolean; correct: number; total: number; passingScore: number } | null>(null)
   const [ftSubmitting, setFtSubmitting] = useState(false)
+  // Instant mode final test state
+  const [ftInstantWrongCounts, setFtInstantWrongCounts] = useState<number[]>([])
+  const [ftInstantFlash, setFtInstantFlash] = useState<number | null>(null)
+  const [ftInstantLocked, setFtInstantLocked] = useState(false)
 
   const lastSavedPositionRef = useRef(0)
+  // Tracks attempt count per questionId within the current session
+  const questionAttemptsCountRef = useRef<Map<string, number>>(new Map())
   // true while replaying a segment after wrong answer; false during first full watch
   const isReplayingRef = useRef(false)
   // Prevents double-trigger of quiz during a single replay
@@ -143,6 +155,13 @@ function LearnPage() {
   const selectedCourse = selectedCourseId ? courseDetails[selectedCourseId] : null
   const selectedCourseLessons = selectedCourse?.lessons || []
   const currentLesson = selectedCourseLessons[currentLessonIndex]
+  const quizMode = (selectedCourse?.quizMode as 'confirm' | 'instant') || 'confirm'
+
+  // Computed — no state lag. On replay (replayCount>0) uses replayPositionRef,
+  // otherwise uses the DB value. VideoPlayer always gets the correct position on first render.
+  const videoMaxPosition = replayCount > 0
+    ? replayPositionRef.current
+    : (currentLesson?.maxWatchedPosition || 0)
 
   // Reset state when lesson changes
   useEffect(() => {
@@ -151,7 +170,10 @@ function LearnPage() {
     quizTriggeredRef.current = false
     quizSkippedBySeekRef.current = false
     prevTimeRef.current = 0
+    replayPositionRef.current = 0
+    questionAttemptsCountRef.current.clear()
     setCourseCompleted(false)
+    setReplayCount(0)
   }, [currentLessonIndex, selectedCourseId])
 
   const questions = useMemo(
@@ -228,9 +250,20 @@ function LearnPage() {
         setFeedbackRating(0)
         setFeedbackComment('')
         setShowFeedback(true)
+      } else {
+        // Auto-advance to next lesson after brief "Урок пройден!" feedback
+        const nextIdx = currentLessonIndex + 1
+        if (nextIdx < selectedCourseLessons.length) {
+          setTimeout(() => {
+            setCurrentLessonIndex(nextIdx)
+            setShowQuiz(false)
+            setIsMinimized(false)
+            setCurrentQuestionIndex(0)
+          }, 1500)
+        }
       }
     },
-    [employee, completedLessons, selectedCourseLessons]
+    [employee, completedLessons, selectedCourseLessons, currentLessonIndex]
   )
 
   const handleSubmitFeedback = async () => {
@@ -249,6 +282,9 @@ function LearnPage() {
     const ft = await getFinalTestFn({ data: { courseId: selectedCourseId } })
     setFinalTestData(ft)
     setFtAnswers(new Array(ft.questions.length).fill(-1))
+    setFtInstantWrongCounts(new Array(ft.questions.length).fill(0))
+    setFtInstantFlash(null)
+    setFtInstantLocked(false)
     setFtCurrentQ(0)
     setFtResult(null)
     setView('finalTest')
@@ -298,31 +334,42 @@ function LearnPage() {
     }
   }, [currentQuestionIndex, questions, currentLesson, markLessonComplete])
 
-  const handleSecondWrong = useCallback(() => {
+  const handleWrongAnswer = useCallback(() => {
     const q = questions[currentQuestionIndex]
     if (q) {
-      // Enter replay mode: video plays from timecodeStart to timecodeTrigger
+      // Enter replay mode: video replays from the beginning (or timecodeStart if set)
       isReplayingRef.current = true
       quizTriggeredRef.current = false
       quizSkippedBySeekRef.current = false
       setShowQuiz(false)
       setIsMinimized(false)
-      setSeekTo(q.timecodeStart)
-      setTimeout(() => setSeekTo(null), 100)
+
+      // Reset saved position so DB gets updated with replay progress
+      lastSavedPositionRef.current = 0
+
+      // Store replay start position and increment key to remount VideoPlayer.
+      // videoMaxPosition is computed from replayPositionRef, so no state lag.
+      const replayFrom = q.timecodeStart > 0 ? q.timecodeStart : 0
+      replayPositionRef.current = replayFrom
+      setReplayCount((n) => n + 1)
     }
   }, [currentQuestionIndex, questions])
 
   const handleQuizSubmit = useCallback(
     (selectedIndex: number, isCorrect: boolean) => {
       if (!employee || !currentLesson || !questions[currentQuestionIndex]) return
+      const questionId = questions[currentQuestionIndex].id
+      const prev = questionAttemptsCountRef.current.get(questionId) ?? 0
+      const attemptNumber = prev + 1
+      questionAttemptsCountRef.current.set(questionId, attemptNumber)
       submitAnswerFn({
         data: {
           userId: employee.id,
           lessonId: currentLesson.id,
-          questionId: questions[currentQuestionIndex].id,
+          questionId,
           selectedIndex,
           correctIndex: questions[currentQuestionIndex].correctIndex,
-          attemptNumber: 1,
+          attemptNumber,
         },
       })
     },
@@ -376,12 +423,12 @@ function LearnPage() {
                 <ChevronRight className="h-4 w-4 rotate-180" />
               </button>
               <div>
-                <p className="text-sm font-semibold text-text">Итоговый тест</p>
+                <p className="text-sm font-semibold text-text">{t('learn.finalTest')}</p>
                 <p className="text-xs text-text-muted">{selectedCourse?.title}</p>
               </div>
             </div>
             <Badge variant="default">
-              Порог: {finalTestData.passingScore}%
+              {t('learn.threshold', { score: finalTestData.passingScore })}
             </Badge>
           </div>
         </header>
@@ -397,13 +444,13 @@ function LearnPage() {
                   : <ClipboardCheck className="h-12 w-12 text-danger" />}
               </div>
               <h2 className="text-2xl font-bold text-text">
-                {ftResult.passed ? 'Тест пройден!' : 'Тест не пройден'}
+                {ftResult.passed ? t('learn.testPassed') : t('learn.testFailed')}
               </h2>
               <p className="mt-2 text-text-muted">
-                Правильных ответов: {ftResult.correct} из {ftResult.total} ({ftResult.score}%)
+                {t('learn.correctAnswers', { correct: ftResult.correct, total: ftResult.total, score: ftResult.score })}
               </p>
               <p className="mt-1 text-sm text-text-muted">
-                Минимальный балл: {ftResult.passingScore}%
+                {t('learn.minScore', { score: ftResult.passingScore })}
               </p>
               <div className="mt-6 flex gap-3">
                 {!ftResult.passed && (
@@ -412,11 +459,11 @@ function LearnPage() {
                     setFtCurrentQ(0)
                     setFtResult(null)
                   }} variant="secondary">
-                    Попробовать снова
+                    {t('learn.tryAgain')}
                   </Button>
                 )}
                 <Button onClick={() => setView('courses')}>
-                  К списку курсов
+                  {t('learn.toCourseList')}
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               </div>
@@ -425,7 +472,7 @@ function LearnPage() {
             // Question screen
             <div className="animate-fade-in">
               <div className="mb-6 flex items-center justify-between">
-                <p className="text-sm text-text-muted">Вопрос {ftCurrentQ + 1} из {finalTestData.questions.length}</p>
+                <p className="text-sm text-text-muted">{t('learn.questionOf', { current: ftCurrentQ + 1, total: finalTestData.questions.length })}</p>
                 <div className="flex gap-1">
                   {finalTestData.questions.map((_, i) => (
                     <div key={i} className={cn('h-1.5 w-8 rounded-full transition-colors',
@@ -441,19 +488,74 @@ function LearnPage() {
                     <button
                       key={oi}
                       onClick={() => {
-                        const next = [...ftAnswers]
-                        next[ftCurrentQ] = oi
-                        setFtAnswers(next)
+                        if (ftInstantLocked) return
+                        if (quizMode === 'instant') {
+                          // Instant mode: click = check
+                          const isCorrect = oi === q.correctIndex
+                          if (isCorrect) {
+                            const next = [...ftAnswers]; next[ftCurrentQ] = oi; setFtAnswers(next)
+                            setFtInstantLocked(true)
+                            setTimeout(() => {
+                              setFtInstantLocked(false)
+                              if (ftCurrentQ < finalTestData.questions.length - 1) {
+                                setFtCurrentQ(ftCurrentQ + 1)
+                              } else {
+                                // Last question — submit
+                                const finalAnswers = [...ftAnswers]; finalAnswers[ftCurrentQ] = oi
+                                setFtAnswers(finalAnswers)
+                                submitFinalTestFn({ data: { userId: employee!.id, courseId: selectedCourseId!, answers: finalAnswers } })
+                                  .then((r) => { if ('score' in r) setFtResult(r) })
+                              }
+                            }, 1000)
+                          } else {
+                            const newCounts = [...ftInstantWrongCounts]
+                            newCounts[ftCurrentQ] = (newCounts[ftCurrentQ] || 0) + 1
+                            setFtInstantWrongCounts(newCounts)
+                            setFtInstantFlash(oi)
+                            setTimeout(() => setFtInstantFlash(null), 800)
+                            if (newCounts[ftCurrentQ] >= 2) {
+                              // 2nd wrong — record wrong answer, move on
+                              const next = [...ftAnswers]; next[ftCurrentQ] = oi; setFtAnswers(next)
+                              setFtInstantLocked(true)
+                              setTimeout(() => {
+                                setFtInstantLocked(false)
+                                if (ftCurrentQ < finalTestData.questions.length - 1) {
+                                  setFtCurrentQ(ftCurrentQ + 1)
+                                } else {
+                                  const finalAnswers = [...ftAnswers]; finalAnswers[ftCurrentQ] = oi
+                                  setFtAnswers(finalAnswers)
+                                  submitFinalTestFn({ data: { userId: employee!.id, courseId: selectedCourseId!, answers: finalAnswers } })
+                                    .then((r) => { if ('score' in r) setFtResult(r) })
+                                }
+                              }, 1200)
+                            }
+                          }
+                        } else {
+                          // Confirm mode: just select
+                          const next = [...ftAnswers]; next[ftCurrentQ] = oi; setFtAnswers(next)
+                        }
                       }}
                       className={cn(
                         'flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left text-sm transition-colors',
-                        ftAnswers[ftCurrentQ] === oi
-                          ? 'border-primary bg-primary-50 text-primary font-medium'
-                          : 'border-border-light bg-surface hover:bg-surface-dim text-text'
+                        // Instant flash wrong
+                        quizMode === 'instant' && ftInstantFlash === oi
+                          ? 'border-danger bg-danger-light text-danger font-medium'
+                          // Instant correct (locked)
+                          : quizMode === 'instant' && ftInstantLocked && ftAnswers[ftCurrentQ] === oi && oi === q.correctIndex
+                            ? 'border-success bg-success-light text-success font-medium'
+                            // Normal selected
+                            : ftAnswers[ftCurrentQ] === oi
+                              ? 'border-primary bg-primary-50 text-primary font-medium'
+                              : 'border-border-light bg-surface hover:bg-surface-dim text-text',
+                        ftInstantLocked && 'pointer-events-none'
                       )}
                     >
                       <span className={cn('flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold',
-                        ftAnswers[ftCurrentQ] === oi ? 'bg-primary text-white' : 'bg-surface-dim text-text-muted')}>
+                        quizMode === 'instant' && ftInstantFlash === oi
+                          ? 'bg-danger text-white'
+                          : quizMode === 'instant' && ftInstantLocked && ftAnswers[ftCurrentQ] === oi && oi === q.correctIndex
+                            ? 'bg-success text-white'
+                            : ftAnswers[ftCurrentQ] === oi ? 'bg-primary text-white' : 'bg-surface-dim text-text-muted')}>
                         {String.fromCharCode(65 + oi)}
                       </span>
                       {opt}
@@ -461,25 +563,33 @@ function LearnPage() {
                   ))}
                 </div>
 
+                {/* Navigation — only in confirm mode */}
+                {quizMode === 'confirm' && (
                 <div className="mt-6 flex justify-between">
                   {ftCurrentQ > 0 ? (
-                    <Button variant="secondary" onClick={() => setFtCurrentQ(ftCurrentQ - 1)}>Назад</Button>
+                    <Button variant="secondary" onClick={() => setFtCurrentQ(ftCurrentQ - 1)}>{t('common.back')}</Button>
                   ) : <div />}
                   {ftCurrentQ < finalTestData.questions.length - 1 ? (
                     <Button onClick={() => setFtCurrentQ(ftCurrentQ + 1)} disabled={ftAnswers[ftCurrentQ] === -1}>
-                      Далее <ChevronRight className="h-4 w-4" />
+                      {t('common.next')} <ChevronRight className="h-4 w-4" />
                     </Button>
                   ) : (
                     <Button onClick={handleSubmitFinalTest} disabled={!allAnswered || ftSubmitting}>
-                      {ftSubmitting ? 'Отправка...' : 'Завершить тест'}
+                      {ftSubmitting ? t('common.sending') : t('learn.finishTest')}
                       <ClipboardCheck className="h-4 w-4" />
                     </Button>
                   )}
                 </div>
+                )}
+
+                {/* Instant mode progress hint */}
+                {quizMode === 'instant' && !ftInstantLocked && (
+                  <p className="mt-4 text-xs text-text-muted text-center">{t('learn.clickToCheck')}</p>
+                )}
               </div>
             </div>
           ) : (
-            <p className="text-center text-text-muted">Нет вопросов в тесте</p>
+            <p className="text-center text-text-muted">{t('learn.noTestQuestions')}</p>
           )}
         </div>
       </div>
@@ -494,9 +604,9 @@ function LearnPage() {
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-danger-light">
             <GraduationCap className="h-8 w-8 text-danger" />
           </div>
-          <h1 className="text-xl font-semibold text-text">Ссылка не найдена</h1>
+          <h1 className="text-xl font-semibold text-text">{t('learn.linkNotFound')}</h1>
           <p className="mt-2 text-sm text-text-muted">
-            Ссылка устарела или неверна. Запросите новую у администратора.
+            {t('learn.linkExpired')}
           </p>
         </div>
       </div>
@@ -509,23 +619,39 @@ function LearnPage() {
     if (courses.length === 0) {
       return (
         <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-surface via-surface to-primary-50 p-6">
+          <div className="fixed top-4 right-4 z-50 flex items-center rounded-xl bg-white/90 backdrop-blur shadow-card border border-border-light p-1">
+            {(['ru', 'kk'] as const).map((lng) => (
+              <button
+                key={lng}
+                onClick={() => i18n.changeLanguage(lng)}
+                className={cn(
+                  'rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors',
+                  i18n.language === lng
+                    ? 'bg-primary text-white'
+                    : 'text-text-muted hover:text-text'
+                )}
+              >
+                {t(`lang.${lng}`)}
+              </button>
+            ))}
+          </div>
           <div className="w-full max-w-md text-center animate-scale-in">
             <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-primary/10">
               <BookOpen className="h-10 w-10 text-primary" />
             </div>
             <h1 className="text-2xl font-bold text-text">
-              Добро пожаловат��, {employee.name.split(' ')[0]}!
+              {t('learn.welcome', { name: employee.name.split(' ')[0] })}
             </h1>
             <p className="mt-3 text-text-secondary">
-              Вам пока не назначены курсы. Как только администратор назначит курс — он появится здесь автоматически.
+              {t('learn.noCoursesAssigned')}
             </p>
             <div className="mt-6 rounded-2xl border border-border-light bg-surface-raised p-4 text-left shadow-card">
-              <p className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">Что вас ждёт</p>
+              <p className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">{t('learn.whatAwaits')}</p>
               <ul className="space-y-2">
                 {[
-                  'Видеоуроки с проверкой знаний',
-                  'Вопросы в ключевых моментах видео',
-                  'Отслеживание прогресса',
+                  t('learn.feat1'),
+                  t('learn.feat2'),
+                  t('learn.feat3'),
                 ].map((text, i) => (
                   <li key={i} className="flex items-center gap-2 text-sm text-text-muted">
                     <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
@@ -542,27 +668,43 @@ function LearnPage() {
     // Has courses — show welcome + instructions
     return (
       <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-surface via-surface to-primary-50 p-6">
+        <div className="fixed top-4 right-4 z-50 flex items-center rounded-xl bg-white/90 backdrop-blur shadow-card border border-border-light p-1">
+          {(['ru', 'kk'] as const).map((lng) => (
+            <button
+              key={lng}
+              onClick={() => i18n.changeLanguage(lng)}
+              className={cn(
+                'rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors',
+                i18n.language === lng
+                  ? 'bg-primary text-white'
+                  : 'text-text-muted hover:text-text'
+              )}
+            >
+              {t(`lang.${lng}`)}
+            </button>
+          ))}
+        </div>
         <div className="w-full max-w-lg text-center animate-scale-in">
           <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-primary/10">
             <GraduationCap className="h-10 w-10 text-primary" />
           </div>
           <h1 className="text-3xl font-bold text-text">
-            Добро пожаловать, {employee.name.split(' ')[0]}!
+            {t('learn.welcome', { name: employee.name.split(' ')[0] })}
           </h1>
           <p className="mt-3 text-text-secondary">
-            Корпоративное обучение. Вам назначено {formatCourses(courses.length)}.
+            {t('learn.corporateTraining', { courses: formatCourses(courses.length, t) })}
           </p>
 
           <div className="mt-6 rounded-2xl border border-border-light bg-surface-raised p-5 text-left shadow-card">
             <h3 className="text-sm font-semibold uppercase tracking-wider text-text-secondary">
-              Как проходить обучение
+              {t('learn.howToLearn')}
             </h3>
             <ul className="mt-3 space-y-2.5">
               {[
-                'Просмотрите видеоурок полностью — перемотка вперёд заблокирована',
-                'Ответьте на вопросы — они появятся в ключевых моментах',
-                'При ошибке вы пересмотрите нужный фрагмент и ответите снова',
-                'Завершите все уроки курса для получения статуса прохождения',
+                t('learn.step1'),
+                t('learn.step2'),
+                t('learn.step3'),
+                t('learn.step4'),
               ].map((text, i) => (
                 <li key={i} className="flex items-start gap-2 text-sm text-text-muted">
                   <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-50 text-xs font-bold text-primary">
@@ -576,7 +718,7 @@ function LearnPage() {
 
           <Button size="lg" className="mt-8 text-base" onClick={() => setView('courses')}>
             <Play className="h-5 w-5" />
-            Начать обучение
+            {t('learn.startLearning')}
           </Button>
         </div>
       </div>
@@ -587,13 +729,29 @@ function LearnPage() {
   if (view === 'courses') {
     return (
       <div className="min-h-screen bg-surface p-6">
+        <div className="fixed top-4 right-4 z-50 flex items-center rounded-xl bg-white/90 backdrop-blur shadow-card border border-border-light p-1">
+          {(['ru', 'kk'] as const).map((lng) => (
+            <button
+              key={lng}
+              onClick={() => i18n.changeLanguage(lng)}
+              className={cn(
+                'rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors',
+                i18n.language === lng
+                  ? 'bg-primary text-white'
+                  : 'text-text-muted hover:text-text'
+              )}
+            >
+              {t(`lang.${lng}`)}
+            </button>
+          ))}
+        </div>
         <div className="mx-auto max-w-3xl">
           <div className="mb-8 flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-white">
               <GraduationCap className="h-5 w-5" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-text">Мои курсы</h1>
+              <h1 className="text-xl font-bold text-text">{t('learn.myCourses')}</h1>
               <p className="text-sm text-text-muted">{employee.name}</p>
             </div>
           </div>
@@ -601,9 +759,9 @@ function LearnPage() {
           {courses.length === 0 ? (
             <div className="rounded-2xl border border-border-light bg-surface-raised p-12 text-center shadow-card">
               <BookOpen className="mx-auto h-12 w-12 text-text-muted/50" />
-              <h3 className="mt-4 text-base font-semibold text-text">Курсы не назначены</h3>
+              <h3 className="mt-4 text-base font-semibold text-text">{t('learn.coursesNotAssigned')}</h3>
               <p className="mt-2 text-sm text-text-muted">
-                Обратитесь к администратору для назначения кур��ов
+                {t('learn.contactAdmin')}
               </p>
             </div>
           ) : (
@@ -630,11 +788,11 @@ function LearnPage() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <h3 className="text-base font-semibold text-text">{course.title}</h3>
-                          {isFinished && <Badge variant="success">Пройден</Badge>}
+                          {isFinished && <Badge variant="success">{t('learn.passed')}</Badge>}
                           {isPathLocked && (
                             <Badge variant="secondary">
                               <Lock className="h-3 w-3 mr-1" />
-                              Заблокирован
+                              {t('learn.locked')}
                             </Badge>
                           )}
                         </div>
@@ -644,14 +802,14 @@ function LearnPage() {
                         <div className="mt-3 flex items-center gap-4 text-xs text-text-muted flex-wrap">
                           <span className="flex items-center gap-1">
                             <BookOpen className="h-3.5 w-3.5" />
-                            {course.lessonsCount} уроков
+                            {t('learn.lessonsCount', { count: course.lessonsCount })}
                           </span>
                           <span className="flex items-center gap-1">
                             <Clock className="h-3.5 w-3.5" />
                             {formatDuration(lessonsArr.reduce((a, l) => a + l.duration, 0))}
                           </span>
                           <span className="text-text-secondary font-medium">
-                            {completed}/{lessonsArr.length} завершено
+                            {t('learn.lessonsCompleted', { completed, total: lessonsArr.length })}
                           </span>
                           {course.deadline && (() => {
                             const dl = new Date(course.deadline)
@@ -665,10 +823,10 @@ function LearnPage() {
                               )}>
                                 <Clock className="h-3.5 w-3.5" />
                                 {overdue
-                                  ? `Просрочен ${Math.abs(daysLeft)} дн.`
+                                  ? t('learn.overdueDays', { days: Math.abs(daysLeft) })
                                   : daysLeft === 0
-                                    ? 'Дедлайн сегодня'
-                                    : `${daysLeft} дн. до дедлайна`}
+                                    ? t('learn.deadlineToday')
+                                    : t('learn.daysUntilDeadline', { days: daysLeft })}
                               </span>
                             )
                           })()}
@@ -678,7 +836,7 @@ function LearnPage() {
                     </div>
                     <div className="mt-4">
                       <div className="mb-1.5 flex items-center justify-between text-xs">
-                        <span className="text-text-muted">Прогресс</span>
+                        <span className="text-text-muted">{t('common.progress')}</span>
                         <span className="font-semibold text-text">{progress}%</span>
                       </div>
                       <Progress value={progress} />
@@ -710,11 +868,11 @@ function LearnPage() {
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-white">{selectedCourse?.title}</p>
             <p className="text-xs text-white/50">
-              Урок {currentLessonIndex + 1} из {selectedCourseLessons.length}
+              {t('learn.lessonOf', { current: currentLessonIndex + 1, total: selectedCourseLessons.length })}
             </p>
           </div>
           <Badge variant={isCurrentLessonCompleted ? 'success' : 'default'}>
-            {isCurrentLessonCompleted ? 'Пройден' : 'В процессе'}
+            {isCurrentLessonCompleted ? t('learn.passed') : t('learn.inProcess')}
           </Badge>
         </div>
       </header>
@@ -725,28 +883,29 @@ function LearnPage() {
           <div className="mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-success/10">
             <Trophy className="h-12 w-12 text-success" />
           </div>
-          <h2 className="text-2xl font-bold text-text">Все уроки пройдены!</h2>
+          <h2 className="text-2xl font-bold text-text">{t('learn.allLessonsPassed')}</h2>
           <p className="mt-2 text-text-muted">
-            Вы успешно завершили все уроки курса «{selectedCourse?.title}»
+            {t('learn.completedAllLessons', { title: selectedCourse?.title })}
           </p>
           <div className="mt-6 flex w-full max-w-xs flex-col items-center gap-3">
             {selectedCourse?.finalTestEnabled && (
               <Button onClick={handleStartFinalTest} size="lg" className="w-full gap-2">
                 <ClipboardCheck className="h-5 w-5" />
-                Пройти итоговый тест
+                {t('learn.takeFinalTest')}
               </Button>
             )}
             <Button onClick={() => setView('courses')} variant="secondary" className="w-full">
-              К списку курсов
+              {t('learn.toCourseList')}
             </Button>
           </div>
         </div>
       ) : (
         <>
-          {/* Portrait video area */}
+          {/* Portrait video area — hidden when quiz is active */}
           <div className={cn(
             'flex justify-center bg-gray-950 transition-all duration-300',
-            isMinimized ? 'py-2' : 'py-3 sm:py-5'
+            isMinimized ? 'py-2' : 'py-3 sm:py-5',
+            showQuiz && 'hidden'
           )}>
             <div className={cn(
               'transition-all duration-300',
@@ -756,11 +915,11 @@ function LearnPage() {
             )}>
               {currentLesson?.vimeoId ? (
                 <VideoPlayer
-                  key={currentLesson.id}
+                  key={`${currentLesson.id}-${replayCount}`}
                   vimeoId={currentLesson.vimeoId}
                   lessonTitle={currentLesson.title}
                   duration={currentLesson.duration}
-                  maxAllowedPosition={currentLesson.maxWatchedPosition}
+                  maxAllowedPosition={videoMaxPosition}
                   onTimeUpdate={handleTimeUpdate}
                   onComplete={handleVideoComplete}
                   seekToTime={seekTo}
@@ -780,9 +939,9 @@ function LearnPage() {
             {!currentLesson ? (
               <div className="p-8 text-center">
                 <BookOpen className="mx-auto h-10 w-10 text-text-muted/50" />
-                <p className="mt-4 text-text-muted">В этом курсе нет уроков</p>
+                <p className="mt-4 text-text-muted">{t('learn.noLessonsInCourse')}</p>
                 <Button className="mt-4" variant="secondary" onClick={() => setView('courses')}>
-                  Вернуться к курсам
+                  {t('learn.backToCourses')}
                 </Button>
               </div>
             ) : (
@@ -803,7 +962,7 @@ function LearnPage() {
                     {questions.length > 0 && (
                       <span className="flex items-center gap-1">
                         <HelpCircle className="h-3.5 w-3.5" />
-                        {questions.length} вопросов
+                        {t('learn.questionsCount', { count: questions.length })}
                       </span>
                     )}
                   </div>
@@ -821,14 +980,14 @@ function LearnPage() {
                     </div>
                     <p className="mb-4 text-sm text-text-muted">
                       {questions.length > 0
-                        ? `Пройдите тест из ${questions.length} вопросов для завершения урока`
-                        : 'Ознакомьтесь с материалом и завершите урок'}
+                        ? t('learn.passTestToComplete', { count: questions.length })
+                        : t('learn.reviewMaterial')}
                     </p>
                     <Button className="w-full" onClick={handleNoVideoComplete}>
                       {questions.length > 0 ? (
-                        <><HelpCircle className="h-4 w-4" /> Начать тест</>
+                        <><HelpCircle className="h-4 w-4" /> {t('learn.startTest')}</>
                       ) : (
-                        <><CheckCircle2 className="h-4 w-4" /> Отметить как пройденный</>
+                        <><CheckCircle2 className="h-4 w-4" /> {t('learn.markAsPassed')}</>
                       )}
                     </Button>
                   </div>
@@ -842,35 +1001,30 @@ function LearnPage() {
                       question={questions[currentQuestionIndex].text}
                       options={questions[currentQuestionIndex].options}
                       correctIndex={questions[currentQuestionIndex].correctIndex}
+                      mode={quizMode}
                       onCorrect={handleCorrectAnswer}
-                      onWrong={handleSecondWrong}
+                      onWrong={handleWrongAnswer}
                       onSubmit={handleQuizSubmit}
                     />
                   </div>
                 )}
 
-                {/* Lesson completed banner */}
+                {/* Lesson completed banner — auto-advances to next lesson */}
                 {isCurrentLessonCompleted && !showQuiz && (
                   <div className="mb-4 flex animate-fade-in items-center justify-between rounded-2xl bg-success-light p-4">
                     <div className="flex items-center gap-3">
                       <CheckCircle2 className="h-5 w-5 text-success shrink-0" />
                       <div>
-                        <p className="text-sm font-semibold text-success">Урок пройден!</p>
+                        <p className="text-sm font-semibold text-success">{t('learn.lessonPassed')}</p>
                         <p className="text-xs text-success/70">
                           {currentLessonIndex < selectedCourseLessons.length - 1
-                            ? 'Переходите к следующему уроку'
-                            : 'Все уроки завершены'}
+                            ? t('learn.nextLesson')
+                            : t('learn.allLessonsCompleted')}
                         </p>
                       </div>
                     </div>
-                    {currentLessonIndex < selectedCourseLessons.length - 1 ? (
-                      <Button size="sm" onClick={() => goToLesson(currentLessonIndex + 1)} variant="success">
-                        Далее <ChevronRight className="h-4 w-4" />
-                      </Button>
-                    ) : (
-                      <Button size="sm" onClick={() => setView('courses')} variant="success">
-                        <Trophy className="h-4 w-4" />
-                      </Button>
+                    {currentLessonIndex < selectedCourseLessons.length - 1 && (
+                      <div className="h-5 w-5 rounded-full border-2 border-success border-t-transparent animate-spin" />
                     )}
                   </div>
                 )}
@@ -879,7 +1033,7 @@ function LearnPage() {
                 {selectedCourseLessons.length > 0 && (
                   <div>
                     <p className="mb-2.5 text-xs font-semibold uppercase tracking-wider text-text-muted">
-                      Уроки курса
+                      {t('learn.courseLessons')}
                     </p>
                     <div className="flex gap-2 overflow-x-auto pb-1">
                       {selectedCourseLessons.map((lesson, index) => {
@@ -934,9 +1088,9 @@ function LearnPage() {
             <div className="p-6">
               <div className="flex items-center gap-2 mb-1">
                 <MessageSquare className="h-5 w-5 text-primary" />
-                <h3 className="font-semibold text-text">Оцените урок</h3>
+                <h3 className="font-semibold text-text">{t('learn.rateLesson')}</h3>
               </div>
-              <p className="text-sm text-text-muted mb-5">Ваша оценка поможет улучшить контент</p>
+              <p className="text-sm text-text-muted mb-5">{t('learn.ratingHelps')}</p>
 
               {/* Stars */}
               <div className="flex justify-center gap-2 mb-5">
@@ -952,7 +1106,7 @@ function LearnPage() {
               <textarea
                 value={feedbackComment}
                 onChange={(e) => setFeedbackComment(e.target.value)}
-                placeholder="Комментарий (необязательно)..."
+                placeholder={t('learn.commentPlaceholder')}
                 rows={3}
                 className="w-full rounded-xl border border-border bg-surface px-3.5 py-2.5 text-sm text-text resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
               />
@@ -962,14 +1116,14 @@ function LearnPage() {
                   onClick={() => setShowFeedback(false)}
                   className="flex-1 rounded-xl border border-border-light px-4 py-2.5 text-sm text-text-muted hover:bg-surface-dim transition-colors"
                 >
-                  Пропустить
+                  {t('common.skip')}
                 </button>
                 <button
                   onClick={handleSubmitFeedback}
                   disabled={feedbackRating === 0 || submittingFeedback}
                   className="flex-1 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50 transition-colors"
                 >
-                  {submittingFeedback ? 'Отправка...' : 'Отправить'}
+                  {submittingFeedback ? t('common.sending') : t('common.send')}
                 </button>
               </div>
             </div>

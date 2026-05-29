@@ -16,6 +16,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as SuperIndexRouteImport } from './routes/super/index'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
 import { Route as SuperLandingRouteImport } from './routes/super/landing'
+import { Route as SuperFuncCompanyRouteImport } from './routes/super/func-company'
 import { Route as LearnTokenRouteImport } from './routes/learn/$token'
 import { Route as AdminStatisticsRouteImport } from './routes/admin/statistics'
 import { Route as AdminSettingsRouteImport } from './routes/admin/settings'
@@ -57,6 +58,11 @@ const AdminIndexRoute = AdminIndexRouteImport.update({
 const SuperLandingRoute = SuperLandingRouteImport.update({
   id: '/landing',
   path: '/landing',
+  getParentRoute: () => SuperRouteRoute,
+} as any)
+const SuperFuncCompanyRoute = SuperFuncCompanyRouteImport.update({
+  id: '/func-company',
+  path: '/func-company',
   getParentRoute: () => SuperRouteRoute,
 } as any)
 const LearnTokenRoute = LearnTokenRouteImport.update({
@@ -105,6 +111,7 @@ export interface FileRoutesByFullPath {
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/statistics': typeof AdminStatisticsRoute
   '/learn/$token': typeof LearnTokenRoute
+  '/super/func-company': typeof SuperFuncCompanyRoute
   '/super/landing': typeof SuperLandingRoute
   '/admin/': typeof AdminIndexRoute
   '/super/': typeof SuperIndexRoute
@@ -119,6 +126,7 @@ export interface FileRoutesByTo {
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/statistics': typeof AdminStatisticsRoute
   '/learn/$token': typeof LearnTokenRoute
+  '/super/func-company': typeof SuperFuncCompanyRoute
   '/super/landing': typeof SuperLandingRoute
   '/admin': typeof AdminIndexRoute
   '/super': typeof SuperIndexRoute
@@ -136,6 +144,7 @@ export interface FileRoutesById {
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/statistics': typeof AdminStatisticsRoute
   '/learn/$token': typeof LearnTokenRoute
+  '/super/func-company': typeof SuperFuncCompanyRoute
   '/super/landing': typeof SuperLandingRoute
   '/admin/': typeof AdminIndexRoute
   '/super/': typeof SuperIndexRoute
@@ -154,6 +163,7 @@ export interface FileRouteTypes {
     | '/admin/settings'
     | '/admin/statistics'
     | '/learn/$token'
+    | '/super/func-company'
     | '/super/landing'
     | '/admin/'
     | '/super/'
@@ -168,6 +178,7 @@ export interface FileRouteTypes {
     | '/admin/settings'
     | '/admin/statistics'
     | '/learn/$token'
+    | '/super/func-company'
     | '/super/landing'
     | '/admin'
     | '/super'
@@ -184,6 +195,7 @@ export interface FileRouteTypes {
     | '/admin/settings'
     | '/admin/statistics'
     | '/learn/$token'
+    | '/super/func-company'
     | '/super/landing'
     | '/admin/'
     | '/super/'
@@ -248,6 +260,13 @@ declare module '@tanstack/react-router' {
       path: '/landing'
       fullPath: '/super/landing'
       preLoaderRoute: typeof SuperLandingRouteImport
+      parentRoute: typeof SuperRouteRoute
+    }
+    '/super/func-company': {
+      id: '/super/func-company'
+      path: '/func-company'
+      fullPath: '/super/func-company'
+      preLoaderRoute: typeof SuperFuncCompanyRouteImport
       parentRoute: typeof SuperRouteRoute
     }
     '/learn/$token': {
@@ -327,11 +346,13 @@ const AdminRouteRouteWithChildren = AdminRouteRoute._addFileChildren(
 )
 
 interface SuperRouteRouteChildren {
+  SuperFuncCompanyRoute: typeof SuperFuncCompanyRoute
   SuperLandingRoute: typeof SuperLandingRoute
   SuperIndexRoute: typeof SuperIndexRoute
 }
 
 const SuperRouteRouteChildren: SuperRouteRouteChildren = {
+  SuperFuncCompanyRoute: SuperFuncCompanyRoute,
   SuperLandingRoute: SuperLandingRoute,
   SuperIndexRoute: SuperIndexRoute,
 }

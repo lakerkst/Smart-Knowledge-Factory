@@ -114,4 +114,13 @@
   .animate-audio-bar {
     animation: audio-bar 0.8s ease-in-out infinite;
   }
+
+  @keyframes shrink-bar {
+    from { width: 100%; }
+    to { width: 0%; }
+  }
+
+  .animate-shrink-bar {
+    animation: shrink-bar 4s linear forwards;
+  }
 }

@@ -1,7 +1,7 @@
 import { createServerFn } from '@tanstack/react-start'
 import { eq, and } from 'drizzle-orm'
 import { db } from '~/../db'
-import { lessonProgress, questionAttempts } from '~/../db/schema'
+import { lessonProgress, questionAttempts, users, activityLog } from '~/../db/schema'
 
 export const updateProgressFn = createServerFn({ method: 'POST' })
   .inputValidator(
@@ -67,17 +67,11 @@ export const submitAnswerFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     const isCorrect = data.selectedIndex === data.correctIndex
 
-    // Record the attempt
-    await db.insert(questionAttempts).values({
-      userId: data.userId,
-      questionId: data.questionId,
-      selectedIndex: data.selectedIndex,
-      isCorrect,
-      attemptNumber: data.attemptNumber,
-    })
+    // Look up user for companyId (needed for activity log)
+    const [user] = await db.select({ companyId: users.companyId }).from(users).where(eq(users.id, data.userId)).limit(1)
 
-    // Update lesson progress attempt count
-    const [existing] = await db
+    // Record the attempt and log activity in parallel
+    const existing = await db
       .select()
       .from(lessonProgress)
       .where(
@@ -87,16 +81,28 @@ export const submitAnswerFn = createServerFn({ method: 'POST' })
         )
       )
       .limit(1)
+      .then((rows) => rows[0])
 
-    if (existing) {
-      await db
-        .update(lessonProgress)
-        .set({
-          attemptCount: data.attemptNumber,
-          updatedAt: new Date(),
-        })
-        .where(eq(lessonProgress.id, existing.id))
-    }
+    await Promise.all([
+      db.insert(questionAttempts).values({
+        userId: data.userId,
+        questionId: data.questionId,
+        selectedIndex: data.selectedIndex,
+        isCorrect,
+        attemptNumber: data.attemptNumber,
+      }),
+      existing
+        ? db.update(lessonProgress).set({ attemptCount: data.attemptNumber, updatedAt: new Date() }).where(eq(lessonProgress.id, existing.id))
+        : Promise.resolve(),
+      user?.companyId
+        ? db.insert(activityLog).values({
+            userId: data.userId,
+            companyId: user.companyId,
+            action: 'question_answered',
+            metadata: JSON.stringify({ questionId: data.questionId, isCorrect }),
+          })
+        : Promise.resolve(),
+    ])
 
     return { isCorrect, attemptNumber: data.attemptNumber }
   })
@@ -104,6 +110,11 @@ export const submitAnswerFn = createServerFn({ method: 'POST' })
 export const completeLessonFn = createServerFn({ method: 'POST' })
   .inputValidator((data: { userId: string; lessonId: string }) => data)
   .handler(async ({ data }) => {
+    const now = new Date()
+
+    // Look up user for companyId (needed for activity log)
+    const [user] = await db.select({ companyId: users.companyId }).from(users).where(eq(users.id, data.userId)).limit(1)
+
     const [existing] = await db
       .select()
       .from(lessonProgress)
@@ -115,25 +126,26 @@ export const completeLessonFn = createServerFn({ method: 'POST' })
       )
       .limit(1)
 
-    if (existing) {
-      await db
-        .update(lessonProgress)
-        .set({
-          status: 'passed',
-          completedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(lessonProgress.id, existing.id))
-    } else {
-      await db.insert(lessonProgress).values({
-        userId: data.userId,
-        lessonId: data.lessonId,
-        status: 'passed',
-        maxWatchedPosition: 0,
-        attemptCount: 1,
-        completedAt: new Date(),
-      })
-    }
+    await Promise.all([
+      existing
+        ? db.update(lessonProgress).set({ status: 'passed', completedAt: now, updatedAt: now }).where(eq(lessonProgress.id, existing.id))
+        : db.insert(lessonProgress).values({
+            userId: data.userId,
+            lessonId: data.lessonId,
+            status: 'passed',
+            maxWatchedPosition: 0,
+            attemptCount: 1,
+            completedAt: now,
+          }),
+      user?.companyId
+        ? db.insert(activityLog).values({
+            userId: data.userId,
+            companyId: user.companyId,
+            action: 'lesson_completed',
+            metadata: JSON.stringify({ lessonId: data.lessonId }),
+          })
+        : Promise.resolve(),
+    ])
 
     return { success: true }
   })

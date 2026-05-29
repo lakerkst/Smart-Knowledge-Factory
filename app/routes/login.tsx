@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { GraduationCap, Mail, Lock, ArrowRight, Eye, EyeOff } from 'lucide-react'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
@@ -10,6 +11,7 @@ export const Route = createFileRoute('/login')({
 })
 
 function LoginPage() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -38,7 +40,7 @@ function LoginPage() {
         navigate({ to: '/admin' })
       }
     } catch {
-      setError('Ошибка подключения к серверу')
+      setError(t('login.serverError'))
       setLoading(false)
     }
   }
@@ -52,13 +54,13 @@ function LoginPage() {
           </div>
           <h2 className="text-3xl font-bold text-white">Smart Knowledge Factory</h2>
           <p className="mt-4 text-lg text-white/70">
-            Платформа корпоративного обучения с гарантией усвоения материала
+            {t('login.platformDescription')}
           </p>
           <div className="mt-8 space-y-4">
             {[
-              'Контроль реального просмотра видео',
-              'Интерактивные тесты на таймкодах',
-              'Детальная аналитика по сотрудникам',
+              t('login.feature1'),
+              t('login.feature2'),
+              t('login.feature3'),
             ].map((text) => (
               <div key={text} className="flex items-center gap-3">
                 <div className="flex h-6 w-6 items-center justify-center rounded-full bg-white/20">
@@ -80,9 +82,9 @@ function LoginPage() {
             <span className="text-xl font-bold text-text">SKF</span>
           </div>
 
-          <h1 className="text-2xl font-bold text-text">Вход в систему</h1>
+          <h1 className="text-2xl font-bold text-text">{t('login.title')}</h1>
           <p className="mt-2 text-sm text-text-muted">
-            Введите email и пароль для доступа к панели управления
+            {t('login.subtitle')}
           </p>
 
           <form onSubmit={handleSubmit} className="mt-8 space-y-4">
@@ -102,12 +104,12 @@ function LoginPage() {
             </div>
 
             <div>
-              <label className="mb-1.5 block text-sm font-medium text-text">Пароль</label>
+              <label className="mb-1.5 block text-sm font-medium text-text">{t('login.password')}</label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
                 <Input
                   type={showPassword ? 'text' : 'password'}
-                  placeholder="Введите пароль"
+                  placeholder={t('login.enterPassword')}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="pl-10 pr-10"
@@ -130,15 +132,15 @@ function LoginPage() {
             )}
 
             <Button type="submit" className="w-full" size="lg" disabled={loading}>
-              {loading ? 'Вход...' : 'Войти'}
+              {loading ? t('login.signingIn') : t('login.signIn')}
               {!loading && <ArrowRight className="h-4 w-4" />}
             </Button>
           </form>
 
           <div className="mt-6 rounded-xl bg-surface-dim p-4 text-xs text-text-muted">
-            <p className="font-medium text-text-secondary mb-1">Демо-аккаунты:</p>
-            <p>Админ компании: admin@technostar.ru / demo123</p>
-            <p>Супер-админ: super@skf.ru / demo123</p>
+            <p className="font-medium text-text-secondary mb-1">{t('login.demoAccounts')}</p>
+            <p>{t('login.companyAdmin')}: admin@technostar.ru / demo123</p>
+            <p>{t('login.superAdminLabel')}: super@skf.ru / demo123</p>
           </div>
         </div>
       </div>
